@@ -62,12 +62,6 @@ final class JSInspectValueWidget {
         if props.isEmpty {
             return labelWithMarkup(span("{}", color: cyan))
         }
-        let header = headerMarkup(
-            title: "Object{\(props.count)}",
-            preview: inlinePreview(forObjectProps: props),
-            color: cyan
-        )
-
         let body = Box(orientation: .vertical, spacing: 2)
         body.marginStart = 16
         body.hexpand = true
@@ -81,7 +75,12 @@ final class JSInspectValueWidget {
             row.append(child: child)
             body.append(child: row)
         }
-        return makeExpander(headerMarkup: header, body: body)
+        return makeExpander(
+            title: "Object{\(props.count)}",
+            preview: inlinePreview(forObjectProps: props),
+            color: cyan,
+            body: body
+        )
     }
 
     private static func makeArrayExpander(
@@ -93,12 +92,6 @@ final class JSInspectValueWidget {
         if elements.isEmpty {
             return labelWithMarkup(span("[]", color: cyan))
         }
-        let header = headerMarkup(
-            title: "Array[\(elements.count)]",
-            preview: inlinePreview(forArrayElements: elements),
-            color: cyan
-        )
-
         let body = Box(orientation: .vertical, spacing: 2)
         body.marginStart = 16
         body.hexpand = true
@@ -112,7 +105,12 @@ final class JSInspectValueWidget {
             row.append(child: child)
             body.append(child: row)
         }
-        return makeExpander(headerMarkup: header, body: body)
+        return makeExpander(
+            title: "Array[\(elements.count)]",
+            preview: inlinePreview(forArrayElements: elements),
+            color: cyan,
+            body: body
+        )
     }
 
     private static func makeMapExpander(
@@ -124,8 +122,6 @@ final class JSInspectValueWidget {
         if entries.isEmpty {
             return labelWithMarkup(span("Map{}", color: cyan))
         }
-        let header = headerMarkup(title: "Map{\(entries.count)}", preview: nil, color: cyan)
-
         let body = Box(orientation: .vertical, spacing: 2)
         body.marginStart = 16
         body.hexpand = true
@@ -141,7 +137,7 @@ final class JSInspectValueWidget {
             row.append(child: valChild)
             body.append(child: row)
         }
-        return makeExpander(headerMarkup: header, body: body)
+        return makeExpander(title: "Map{\(entries.count)}", preview: nil, color: cyan, body: body)
     }
 
     private static func makeSetExpander(
@@ -153,8 +149,6 @@ final class JSInspectValueWidget {
         if elements.isEmpty {
             return labelWithMarkup(span("Set{}", color: cyan))
         }
-        let header = headerMarkup(title: "Set{\(elements.count)}", preview: nil, color: cyan)
-
         let body = Box(orientation: .vertical, spacing: 2)
         body.marginStart = 16
         body.hexpand = true
@@ -168,20 +162,26 @@ final class JSInspectValueWidget {
             row.append(child: child)
             body.append(child: row)
         }
-        return makeExpander(headerMarkup: header, body: body)
+        return makeExpander(title: "Set{\(elements.count)}", preview: nil, color: cyan, body: body)
     }
 
-    private static func makeExpander(headerMarkup: String, body: Widget) -> Widget {
+    private static func makeExpander(title: String, preview: String?, color: String, body: Widget) -> Widget {
         let expander = Expander(label: "")
         expander.add(cssClass: "luma-js-expander")
+        expander.expanded = true
+        expander.halign = .start
         let titleLabel = Label(str: "")
-        titleLabel.setMarkup(str: headerMarkup)
+        titleLabel.setMarkup(str: headerMarkup(title: title, preview: nil, color: color))
         titleLabel.add(cssClass: "monospace")
         titleLabel.halign = .start
         expander.set(labelWidget: titleLabel)
         expander.set(child: body)
-        expander.expanded = true
-        expander.halign = .start
+        expander.onNotifyExpanded { [titleLabel] expander, _ in
+            MainActor.assumeIsolated {
+                let visiblePreview = expander.expanded ? nil : preview
+                titleLabel.setMarkup(str: headerMarkup(title: title, preview: visiblePreview, color: color))
+            }
+        }
         return expander
     }
 

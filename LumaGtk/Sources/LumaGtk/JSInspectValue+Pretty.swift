@@ -18,9 +18,7 @@ extension JSInspectValue {
             if n.rounded(.towardZero) == n { return String(Int(n)) }
             return String(n)
         case .string(let s):
-            let maxLen = 80
-            let body = s.count > maxLen ? s.prefix(maxLen) + "…" : Substring(s)
-            return "\"\(body)\""
+            return "\"\(escapeForInline(s))\""
         case .object(_, let props):
             return "Object{\(props.count)}"
         case .array(_, let items):
@@ -152,4 +150,29 @@ extension JSInspectValue.Property {
         default: return key.inlineDescription
         }
     }
+}
+
+private let inlineStringMaxLength = 80
+
+private func escapeForInline(_ s: String) -> String {
+    var escaped = ""
+    for scalar in s.unicodeScalars {
+        switch scalar {
+        case "\\": escaped += "\\\\"
+        case "\"": escaped += "\\\""
+        case "\n": escaped += "\\n"
+        case "\r": escaped += "\\r"
+        case "\t": escaped += "\\t"
+        default:
+            if scalar.value < 0x20 {
+                escaped += String(format: "\\u%04x", scalar.value)
+            } else {
+                escaped += String(scalar)
+            }
+        }
+    }
+    if escaped.count > inlineStringMaxLength {
+        return String(escaped.prefix(inlineStringMaxLength)) + "…"
+    }
+    return escaped
 }

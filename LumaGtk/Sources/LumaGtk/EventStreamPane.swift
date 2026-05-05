@@ -726,7 +726,7 @@ final class EventStreamPane {
             return "\(process) • REPL"
         case .instrument:
             let name = instrument(for: event)
-                .flatMap { engine?.descriptor(for: $0)?.displayName } ?? "Instrument"
+                .map { engine?.descriptor(for: $0).displayName ?? "Instrument" } ?? "Instrument"
             return "\(name) • \(process)"
         }
     }
@@ -743,10 +743,8 @@ final class EventStreamPane {
         case .console: return "console"
         case .repl: return "repl"
         case .instrument:
-            if let instance = instrument(for: event),
-                let descriptor = engine?.descriptor(for: instance)
-            {
-                return descriptor.displayName
+            if let instance = instrument(for: event), let engine {
+                return engine.descriptor(for: instance).displayName
             }
             return "Instrument"
         }
@@ -880,16 +878,10 @@ final class EventStreamPane {
             isStructured(value)
         else { return nil }
 
-        let expander = Expander(label: value.inlineDescription)
-        expander.hexpand = true
         let wrapper = JSInspectValueWidget.make(value: value, engine: engine, sessionID: sessionID)
         jsValueKeepers.append(wrapper)
-        let body = wrapper.widget
-        body.marginStart = 12
-        body.marginTop = 4
-        body.marginBottom = 4
-        expander.set(child: body)
-        return expander
+        wrapper.widget.hexpand = true
+        return wrapper.widget
     }
 
     private func isStructured(_ value: JSInspectValue) -> Bool {
@@ -948,16 +940,10 @@ final class EventStreamPane {
             payload.add(cssClass: "monospace")
             column.append(child: payload)
         } else {
-            let expander = Expander(label: parsed.message.inlineDescription)
-            expander.hexpand = true
             let wrapper = JSInspectValueWidget.make(value: parsed.message, engine: engine!, sessionID: sessionID)
             jsValueKeepers.append(wrapper)
-            let body = wrapper.widget
-            body.marginStart = 12
-            body.marginTop = 4
-            body.marginBottom = 4
-            expander.set(child: body)
-            column.append(child: expander)
+            wrapper.widget.hexpand = true
+            column.append(child: wrapper.widget)
         }
 
         if let backtrace = parsed.backtrace, !backtrace.isEmpty, let node {
@@ -1220,10 +1206,8 @@ final class EventStreamPane {
             return "repl\(processSuffix)"
         case .instrument:
             let name: String
-            if let instance = instrument(for: event),
-                let descriptor = engine?.descriptor(for: instance)
-            {
-                name = descriptor.displayName
+            if let instance = instrument(for: event), let engine {
+                name = engine.descriptor(for: instance).displayName
             } else {
                 name = "Instrument"
             }
