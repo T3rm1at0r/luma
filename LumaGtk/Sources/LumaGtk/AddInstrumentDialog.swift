@@ -96,18 +96,6 @@ final class AddInstrumentDialog {
         dialog.set(child: toolbarView)
         dialog.set(defaultWidget: addButton)
 
-        let newCustomRow = ListBoxRow()
-        let newCustomBox = Box(orientation: .vertical, spacing: 2)
-        newCustomBox.marginStart = 12
-        newCustomBox.marginEnd = 12
-        newCustomBox.marginTop = 8
-        newCustomBox.marginBottom = 8
-        let newCustomLabel = Label(str: "+ New Custom Instrument\u{2026}")
-        newCustomLabel.halign = .start
-        newCustomBox.append(child: newCustomLabel)
-        newCustomRow.set(child: newCustomBox)
-        listBox.append(child: newCustomRow)
-
         for descriptor in descriptors {
             let row = ListBoxRow()
             let isDisabled = disabledDescriptorIDs.contains(descriptor.id)
@@ -134,27 +122,32 @@ final class AddInstrumentDialog {
             listBox.append(child: row)
         }
 
-        showPlaceholder(message: "Select an instrument to configure.")
+        let newCustomRow = ListBoxRow()
+        let newCustomBox = Box(orientation: .vertical, spacing: 2)
+        newCustomBox.marginStart = 12
+        newCustomBox.marginEnd = 12
+        newCustomBox.marginTop = 8
+        newCustomBox.marginBottom = 8
+        let newCustomLabel = Label(str: "+ New Custom Instrument\u{2026}")
+        newCustomLabel.halign = .start
+        newCustomBox.append(child: newCustomLabel)
+        newCustomRow.set(child: newCustomBox)
+        listBox.append(child: newCustomRow)
+        let newCustomIndex = descriptors.count
 
-        listBox.onRowActivated { [weak self] _, row in
-            MainActor.assumeIsolated {
-                guard let self, self.addButton.sensitive else { return }
-                if Int(row.index) == 0 { return }
-                self.commit()
-            }
-        }
+        showPlaceholder(message: "Select an instrument to configure.")
 
         listBox.onRowSelected { [weak self] _, row in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if let row {
                     let idx = Int(row.index)
-                    if idx == 0 {
+                    if idx == newCustomIndex {
                         self.selectedIndex = nil
                         self.addButton.sensitive = true
                         self.showNewCustomDetail()
                     } else {
-                        self.selectedIndex = idx - 1
+                        self.selectedIndex = idx
                         self.addButton.sensitive = true
                         self.refreshDetail()
                     }
