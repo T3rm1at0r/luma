@@ -12,6 +12,7 @@ final class CustomInstrumentSchemaEditor {
     private let onChanged: (FeatureSchema) -> Void
     private let typeRow: Box
     private let fieldsBox: Box
+    private var childEditors: [AnyObject] = []
 
     init(schema: FeatureSchema, onChanged: @escaping (FeatureSchema) -> Void) {
         self.schema = schema
@@ -73,6 +74,7 @@ final class CustomInstrumentSchemaEditor {
 
     private func rebuildFields() {
         clearChildren(of: fieldsBox)
+        childEditors.removeAll()
 
         switch schema {
         case .boolean:
@@ -147,6 +149,7 @@ final class CustomInstrumentSchemaEditor {
         let editor = ChoicesEditor(choices: choices) { [weak self] newChoices in
             self?.applyComboChoices(newChoices)
         }
+        childEditors.append(editor)
         fieldsBox.append(child: editor.widget)
 
         let defaultRow = labeledRow("Default")
@@ -166,6 +169,7 @@ final class CustomInstrumentSchemaEditor {
         let editor = ObjectFieldsEditor(fields: fields) { [weak self] newFields in
             self?.applyObjectFields(newFields)
         }
+        childEditors.append(editor)
         fieldsBox.append(child: editor.widget)
     }
 
@@ -189,11 +193,13 @@ final class CustomInstrumentSchemaEditor {
             let editor = ChoicesEditor(choices: choices) { [weak self] newChoices in
                 self?.applyArrayComboChoices(newChoices)
             }
+            childEditors.append(editor)
             fieldsBox.append(child: editor.widget)
         case .object(let fields):
             let editor = ObjectFieldsEditor(fields: fields) { [weak self] newFields in
                 self?.applyArrayObjectFields(newFields)
             }
+            childEditors.append(editor)
             fieldsBox.append(child: editor.widget)
         default:
             break
@@ -417,6 +423,7 @@ final class ObjectFieldsEditor {
     private let onChanged: ([ObjectField]) -> Void
     private let listBox: Box
     private let draftEntry: Entry
+    private var fieldSchemaEditors: [CustomInstrumentSchemaEditor] = []
 
     init(fields: [ObjectField], onChanged: @escaping ([ObjectField]) -> Void) {
         self.fields = fields
@@ -450,6 +457,7 @@ final class ObjectFieldsEditor {
             child = current.nextSibling
             listBox.remove(child: current)
         }
+        fieldSchemaEditors.removeAll()
         if fields.isEmpty {
             let empty = Label(str: "No fields defined.")
             empty.add(cssClass: "dim-label")
@@ -463,12 +471,15 @@ final class ObjectFieldsEditor {
     }
 
     private func fieldRow(field: ObjectField, index: Int) -> Box {
+        let card = Box(orientation: .vertical, spacing: 0)
+        card.add(cssClass: "card")
+
         let column = Box(orientation: .vertical, spacing: 4)
-        column.add(cssClass: "card")
-        column.marginStart = 4
-        column.marginEnd = 4
-        column.marginTop = 4
-        column.marginBottom = 4
+        column.marginStart = 10
+        column.marginEnd = 10
+        column.marginTop = 10
+        column.marginBottom = 10
+        card.append(child: column)
 
         let header = Box(orientation: .horizontal, spacing: 6)
         let nameEntry = Entry()
@@ -551,9 +562,10 @@ final class ObjectFieldsEditor {
                 self.onChanged(self.fields)
             }
         }
+        fieldSchemaEditors.append(editor)
         column.append(child: editor.widget)
 
-        return column
+        return card
     }
 
     private func isBoolean(_ schema: FeatureSchema) -> Bool {

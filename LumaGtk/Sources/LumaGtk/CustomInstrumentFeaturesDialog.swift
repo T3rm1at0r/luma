@@ -12,6 +12,7 @@ final class CustomInstrumentFeaturesDialog {
     private let listBox: Box
     private let idEntry: Entry
     private let nameEntry: Entry
+    private var featureSchemaEditors: [CustomInstrumentSchemaEditor] = []
 
     init(engine: Engine, def: CustomInstrumentDef) {
         self.engine = engine
@@ -127,6 +128,7 @@ final class CustomInstrumentFeaturesDialog {
             child = current.nextSibling
             listBox.remove(child: current)
         }
+        featureSchemaEditors.removeAll()
         if draftFeatures.isEmpty {
             let empty = Label(str: "No features defined.")
             empty.add(cssClass: "dim-label")
@@ -140,12 +142,15 @@ final class CustomInstrumentFeaturesDialog {
     }
 
     private func featureRow(feature: CustomInstrumentDef.Feature, index: Int) -> Box {
+        let card = Box(orientation: .vertical, spacing: 0)
+        card.add(cssClass: "card")
+
         let column = Box(orientation: .vertical, spacing: 6)
-        column.add(cssClass: "card")
-        column.marginStart = 4
-        column.marginEnd = 4
-        column.marginTop = 4
-        column.marginBottom = 4
+        column.marginStart = 12
+        column.marginEnd = 12
+        column.marginTop = 12
+        column.marginBottom = 12
+        card.append(child: column)
 
         let header = Box(orientation: .horizontal, spacing: 8)
         let idLabel = Label(str: feature.id)
@@ -231,9 +236,10 @@ final class CustomInstrumentFeaturesDialog {
                 }
             }
         }
+        featureSchemaEditors.append(editor)
         column.append(child: editor.widget)
 
-        return column
+        return card
     }
 
     private func isBoolean(_ schema: FeatureSchema) -> Bool {
