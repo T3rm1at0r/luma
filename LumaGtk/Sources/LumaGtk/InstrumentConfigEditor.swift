@@ -5,6 +5,10 @@ import GLibObject
 import Gtk
 import LumaCore
 
+extension Notification.Name {
+    static let lumaSelectCustomInstrumentDef = Notification.Name("LumaGtk.SelectCustomInstrumentDef")
+}
+
 @MainActor
 final class InstrumentConfigEditor {
     let widget: Box
@@ -13,6 +17,8 @@ final class InstrumentConfigEditor {
     private var instrument: LumaCore.InstrumentInstance
     private var tracerEditor: TracerConfigEditor?
     private let sharedTracerMonaco: MonacoEditor
+    private var customFeatureEditors: [FeatureValueEditor] = []
+    private var hookPackFeatureEditors: [FeatureValueEditor] = []
 
     init(engine: Engine, instrument: LumaCore.InstrumentInstance, tracerEditor: MonacoEditor) {
         self.engine = engine
@@ -40,7 +46,119 @@ final class InstrumentConfigEditor {
             buildHookPack()
         case .codeShare:
             buildCodeShare()
+        case .custom:
+            buildCustom()
         }
+    }
+
+    private func buildCustom() {
+        let outer = Box(orientation: .vertical, spacing: 8)
+        outer.hexpand = true
+        outer.marginStart = 24
+        outer.marginEnd = 24
+        outer.marginTop = 8
+        outer.marginBottom = 12
+        widget.append(child: outer)
+
+        guard let engine,
+            let config = try? CustomInstrumentConfig.decode(from: instrument.configJSON),
+            let def = engine.customInstruments.def(withId: config.defID)
+        else {
+            outer.append(child: errorLabel("Custom instrument not found"))
+            return
+        }
+
+        let title = Label(str: def.name)
+        title.add(cssClass: "title-3")
+        title.halign = .start
+        outer.append(child: title)
+
+        let editButton = Button(label: "Edit Source\u{2026}")
+        editButton.halign = .start
+        let defID = def.id
+        editButton.onClicked { _ in
+            MainActor.assumeIsolated {
+                NotificationCenter.default.post(
+                    name: .lumaSelectCustomInstrumentDef,
+                    object: nil,
+                    userInfo: ["defID": defID.uuidString]
+                )
+            }
+        }
+        outer.append(child: editButton)
+
+        let header = Label(str: "Features")
+        header.halign = .start
+        header.add(cssClass: "heading")
+        outer.append(child: header)
+
+        if def.features.isEmpty {
+            outer.append(child: dimLabel("This custom instrument does not declare any features."))
+            return
+        }
+
+        customFeatureEditors.removeAll()
+        for feature in def.features {
+            outer.append(child: customFeatureRow(feature: feature, config: config))
+        }
+    }
+
+    private func customFeatureRow(feature: CustomInstrumentDef.Feature, config: CustomInstrumentConfig) -> Box {
+        let row = Box(orientation: .vertical, spacing: 4)
+        row.hexpand = true
+
+        let initialEnabled = config.features[feature.id]?.enabled ?? feature.enabledByDefault
+        let initialValue = config.features[feature.id]?.value ?? feature.schema.defaultValue
+        let fid = feature.id
+
+        if feature.optional {
+            let header = Box(orientation: .horizontal, spacing: 8)
+            header.hexpand = true
+            let toggle = Switch()
+            toggle.active = initialEnabled
+            toggle.valign = .center
+            header.append(child: toggle)
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            nameLabel.hexpand = true
+            header.append(child: nameLabel)
+            row.append(child: header)
+
+            toggle.onStateSet { [weak self] _, state in
+                MainActor.assumeIsolated {
+                    self?.mutateCustom { cfg in
+                        let existingValue = cfg.features[fid]?.value ?? feature.schema.defaultValue
+                        cfg.features[fid] = FeatureState(enabled: state, value: existingValue)
+                    }
+                    return false
+                }
+            }
+
+            if case .boolean = feature.schema {
+                return row
+            }
+        } else {
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            row.append(child: nameLabel)
+        }
+
+        let editor = FeatureValueEditor(schema: feature.schema, value: initialValue) { [weak self] newValue in
+            self?.mutateCustom { cfg in
+                let existingEnabled = cfg.features[fid]?.enabled ?? feature.enabledByDefault
+                cfg.features[fid] = FeatureState(enabled: existingEnabled, value: newValue)
+            }
+        }
+        customFeatureEditors.append(editor)
+        editor.widget.marginStart = feature.optional ? 28 : 0
+        row.append(child: editor.widget)
+        return row
+    }
+
+    private func mutateCustom(_ body: (inout CustomInstrumentConfig) -> Void) {
+        guard var cfg = try? CustomInstrumentConfig.decode(from: instrument.configJSON) else { return }
+        body(&cfg)
+        apply(configJSON: cfg.encode())
     }
 
     // MARK: - Tracer
@@ -128,38 +246,40 @@ final class InstrumentConfigEditor {
             return
         }
 
+        hookPackFeatureEditors.removeAll()
         for feature in pack.manifest.features {
-            let row = Box(orientation: .horizontal, spacing: 8)
-            row.hexpand = true
-
-            let toggle = Switch()
-            toggle.active = config.features[feature.id] != nil
-            toggle.valign = .center
-            row.append(child: toggle)
-
-            let name = Label(str: feature.name)
-            name.halign = .start
-            name.hexpand = true
-            row.append(child: name)
-
-            let featureID = feature.id
-            toggle.onStateSet { [weak self] _, state in
-                MainActor.assumeIsolated {
-                    self?.mutateHookPack { cfg in
-                        if state {
-                            if cfg.features[featureID] == nil {
-                                cfg.features[featureID] = FeatureConfig()
-                            }
-                        } else {
-                            cfg.features.removeValue(forKey: featureID)
-                        }
-                    }
-                }
-                return false
-            }
-
-            outer.append(child: row)
+            outer.append(child: hookPackFeatureRow(feature: feature, config: config))
         }
+    }
+
+    private func hookPackFeatureRow(feature: HookPackManifest.Feature, config: HookPackConfig) -> Box {
+        let row = Box(orientation: .horizontal, spacing: 8)
+        row.hexpand = true
+
+        let nameLabel = Label(str: feature.name)
+        nameLabel.halign = .start
+        nameLabel.setSizeRequest(width: 200, height: -1)
+        row.append(child: nameLabel)
+
+        let initialValue: FeatureValue = .boolean(config.features[feature.id] != nil)
+        let featureID = feature.id
+        let editor = FeatureValueEditor(
+            schema: .boolean,
+            value: initialValue
+        ) { [weak self] newValue in
+            self?.mutateHookPack { cfg in
+                if case .boolean(true) = newValue {
+                    if cfg.features[featureID] == nil {
+                        cfg.features[featureID] = FeatureConfig()
+                    }
+                } else {
+                    cfg.features.removeValue(forKey: featureID)
+                }
+            }
+        }
+        hookPackFeatureEditors.append(editor)
+        row.append(child: editor.widget)
+        return row
     }
 
     private func mutateHookPack(_ body: (inout HookPackConfig) -> Void) {
@@ -308,7 +428,7 @@ final class InstrumentConfigEditor {
         case .tracer:
             guard let config = try? TracerConfig.decode(from: updated.configJSON) else { return }
             tracerEditor?.update(config: config)
-        case .hookPack, .codeShare:
+        case .hookPack, .codeShare, .custom:
             rebuild()
         }
     }

@@ -20,6 +20,26 @@ public final class MonacoEditor {
     private var isLoaded = false
 
     private static var instances: [ObjectIdentifier: MonacoEditor] = [:]
+    private static var overlaySuspendCount: Int = 0
+
+    public static func suspendOverlays() {
+        overlaySuspendCount += 1
+        if overlaySuspendCount == 1 {
+            for editor in instances.values {
+                luma_monaco_view_set_overlay_visible(editor.view, false)
+            }
+        }
+    }
+
+    public static func resumeOverlays() {
+        guard overlaySuspendCount > 0 else { return }
+        overlaySuspendCount -= 1
+        if overlaySuspendCount == 0 {
+            for editor in instances.values {
+                luma_monaco_view_set_overlay_visible(editor.view, true)
+            }
+        }
+    }
 
     public init(profile: EditorProfile = .init(), initialText: String = "") {
         self.profile = profile

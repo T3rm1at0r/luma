@@ -23,6 +23,8 @@ final class AddInstrumentDialog {
     private var selectedIndex: Int?
     private var pendingConfigJSON: Data = Data()
     private var tracerEditor: TracerConfigEditor?
+    private var customFeatureEditors: [FeatureValueEditor] = []
+    private var hookPackFeatureEditors: [FeatureValueEditor] = []
     private let sharedTracerMonaco: MonacoEditor
     private let sharedCodeShareMonaco: MonacoEditor
 
@@ -94,6 +96,18 @@ final class AddInstrumentDialog {
         dialog.set(child: toolbarView)
         dialog.set(defaultWidget: addButton)
 
+        let newCustomRow = ListBoxRow()
+        let newCustomBox = Box(orientation: .vertical, spacing: 2)
+        newCustomBox.marginStart = 12
+        newCustomBox.marginEnd = 12
+        newCustomBox.marginTop = 8
+        newCustomBox.marginBottom = 8
+        let newCustomLabel = Label(str: "+ New Custom Instrument\u{2026}")
+        newCustomLabel.halign = .start
+        newCustomBox.append(child: newCustomLabel)
+        newCustomRow.set(child: newCustomBox)
+        listBox.append(child: newCustomRow)
+
         for descriptor in descriptors {
             let row = ListBoxRow()
             let isDisabled = disabledDescriptorIDs.contains(descriptor.id)
@@ -122,9 +136,10 @@ final class AddInstrumentDialog {
 
         showPlaceholder(message: "Select an instrument to configure.")
 
-        listBox.onRowActivated { [weak self] _, _ in
+        listBox.onRowActivated { [weak self] _, row in
             MainActor.assumeIsolated {
                 guard let self, self.addButton.sensitive else { return }
+                if Int(row.index) == 0 { return }
                 self.commit()
             }
         }
@@ -133,9 +148,16 @@ final class AddInstrumentDialog {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if let row {
-                    self.selectedIndex = Int(row.index)
-                    self.addButton.sensitive = true
-                    self.refreshDetail()
+                    let idx = Int(row.index)
+                    if idx == 0 {
+                        self.selectedIndex = nil
+                        self.addButton.sensitive = true
+                        self.showNewCustomDetail()
+                    } else {
+                        self.selectedIndex = idx - 1
+                        self.addButton.sensitive = true
+                        self.refreshDetail()
+                    }
                 } else {
                     self.selectedIndex = nil
                     self.addButton.sensitive = false
@@ -215,7 +237,168 @@ final class AddInstrumentDialog {
             buildHookPackEditor(descriptor: descriptor)
         case .codeShare:
             buildCodeShareEditor(descriptor: descriptor)
+        case .custom:
+            buildCustomInstanceEditor(descriptor: descriptor)
         }
+    }
+
+    private func buildCustomInstanceEditor(descriptor: LumaCore.InstrumentDescriptor) {
+        let outer = Box(orientation: .vertical, spacing: 8)
+        outer.hexpand = true
+        outer.marginStart = 24
+        outer.marginEnd = 24
+        outer.marginTop = 16
+        outer.marginBottom = 16
+        detailContainer.append(child: outer)
+
+        guard let defID = UUID(uuidString: descriptor.sourceIdentifier),
+            let def = engine.customInstruments.def(withId: defID),
+            let config = try? CustomInstrumentConfig.decode(from: pendingConfigJSON)
+        else {
+            outer.append(child: errorLabel("Custom instrument not found"))
+            return
+        }
+
+        let title = Label(str: def.name)
+        title.halign = .start
+        title.add(cssClass: "title-3")
+        outer.append(child: title)
+
+        let header = Label(str: "Features")
+        header.halign = .start
+        header.add(cssClass: "heading")
+        header.marginTop = 8
+        outer.append(child: header)
+
+        customFeatureEditors.removeAll()
+
+        if def.features.isEmpty {
+            let dim = Label(str: "This custom instrument does not declare any features.")
+            dim.add(cssClass: "dim-label")
+            dim.halign = .start
+            outer.append(child: dim)
+        } else {
+            for feature in def.features {
+                outer.append(child: customFeatureRow(feature: feature, configCapture: config))
+            }
+        }
+
+        pendingConfigJSON = config.encode()
+    }
+
+    private func hookPackFeatureRow(feature: HookPackManifest.Feature, configCapture: HookPackConfig) -> Box {
+        let row = Box(orientation: .horizontal, spacing: 8)
+        row.hexpand = true
+
+        let nameLabel = Label(str: feature.name)
+        nameLabel.halign = .start
+        nameLabel.setSizeRequest(width: 200, height: -1)
+        row.append(child: nameLabel)
+
+        let initialValue: FeatureValue = .boolean(configCapture.features[feature.id] != nil)
+        let featureID = feature.id
+        let editor = FeatureValueEditor(
+            schema: .boolean,
+            value: initialValue
+        ) { [weak self] newValue in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard var cfg = try? JSONDecoder().decode(HookPackConfig.self, from: self.pendingConfigJSON) else { return }
+                if case .boolean(true) = newValue {
+                    if cfg.features[featureID] == nil {
+                        cfg.features[featureID] = FeatureConfig()
+                    }
+                } else {
+                    cfg.features.removeValue(forKey: featureID)
+                }
+                if let data = try? JSONEncoder().encode(cfg) {
+                    self.pendingConfigJSON = data
+                }
+            }
+        }
+        hookPackFeatureEditors.append(editor)
+        row.append(child: editor.widget)
+        return row
+    }
+
+    private func customFeatureRow(feature: CustomInstrumentDef.Feature, configCapture: CustomInstrumentConfig) -> Box {
+        let row = Box(orientation: .vertical, spacing: 4)
+        row.hexpand = true
+
+        let initialEnabled = configCapture.features[feature.id]?.enabled ?? feature.enabledByDefault
+        let initialValue = configCapture.features[feature.id]?.value ?? feature.schema.defaultValue
+        let fid = feature.id
+
+        if feature.optional {
+            let header = Box(orientation: .horizontal, spacing: 8)
+            header.hexpand = true
+            let toggle = Switch()
+            toggle.active = initialEnabled
+            toggle.valign = .center
+            header.append(child: toggle)
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            nameLabel.hexpand = true
+            header.append(child: nameLabel)
+            row.append(child: header)
+
+            toggle.onStateSet { [weak self] _, state in
+                MainActor.assumeIsolated {
+                    guard let self else { return false }
+                    guard var cfg = try? CustomInstrumentConfig.decode(from: self.pendingConfigJSON) else { return false }
+                    let existingValue = cfg.features[fid]?.value ?? feature.schema.defaultValue
+                    cfg.features[fid] = FeatureState(enabled: state, value: existingValue)
+                    self.pendingConfigJSON = cfg.encode()
+                    return false
+                }
+            }
+
+            if case .boolean = feature.schema {
+                return row
+            }
+        } else {
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            row.append(child: nameLabel)
+        }
+
+        let editor = FeatureValueEditor(schema: feature.schema, value: initialValue) { [weak self] newValue in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard var cfg = try? CustomInstrumentConfig.decode(from: self.pendingConfigJSON) else { return }
+                let existingEnabled = cfg.features[fid]?.enabled ?? feature.enabledByDefault
+                cfg.features[fid] = FeatureState(enabled: existingEnabled, value: newValue)
+                self.pendingConfigJSON = cfg.encode()
+            }
+        }
+        customFeatureEditors.append(editor)
+        editor.widget.marginStart = feature.optional ? 28 : 0
+        row.append(child: editor.widget)
+        return row
+    }
+
+    private func showNewCustomDetail() {
+        clearDetail()
+        let box = Box(orientation: .vertical, spacing: 12)
+        box.halign = .center
+        box.valign = .center
+        box.hexpand = true
+        box.vexpand = true
+        box.marginStart = 24
+        box.marginEnd = 24
+        box.marginTop = 24
+        box.marginBottom = 24
+
+        let title = Label(str: "Create a Custom Instrument")
+        title.add(cssClass: "title-3")
+        box.append(child: title)
+
+        let hint = Label(str: "A custom instrument is a TypeScript snippet saved with the project. After creating you can rename it, choose an icon, and define toggleable features from the sidebar.")
+        hint.add(cssClass: "dim-label")
+        hint.wrap = true
+        hint.justify = .center
+        box.append(child: hint)
+        detailContainer.append(child: box)
     }
 
     private func buildTracerEditor(descriptor: LumaCore.InstrumentDescriptor) {
@@ -246,7 +429,7 @@ final class AddInstrumentDialog {
         detailContainer.append(child: outer)
 
         guard
-            var config = try? JSONDecoder().decode(HookPackConfig.self, from: pendingConfigJSON),
+            let config = try? JSONDecoder().decode(HookPackConfig.self, from: pendingConfigJSON),
             let pack = engine.hookPacks.pack(withId: descriptor.sourceIdentifier)
         else {
             outer.append(child: errorLabel("Failed to load hook pack"))
@@ -279,39 +462,9 @@ final class AddInstrumentDialog {
             return
         }
 
+        hookPackFeatureEditors.removeAll()
         for feature in pack.manifest.features {
-            let row = Box(orientation: .horizontal, spacing: 8)
-            row.hexpand = true
-
-            let toggle = Switch()
-            toggle.active = config.features[feature.id] != nil
-            toggle.valign = .center
-            row.append(child: toggle)
-
-            let name = Label(str: feature.name)
-            name.halign = .start
-            name.hexpand = true
-            row.append(child: name)
-
-            let featureID = feature.id
-            toggle.onStateSet { [weak self] _, state in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    if state {
-                        if config.features[featureID] == nil {
-                            config.features[featureID] = FeatureConfig()
-                        }
-                    } else {
-                        config.features.removeValue(forKey: featureID)
-                    }
-                    if let data = try? JSONEncoder().encode(config) {
-                        self.pendingConfigJSON = data
-                    }
-                }
-                return false
-            }
-
-            outer.append(child: row)
+            outer.append(child: hookPackFeatureRow(feature: feature, configCapture: config))
         }
 
         if let data = try? JSONEncoder().encode(config) {
@@ -467,6 +620,10 @@ final class AddInstrumentDialog {
     }
 
     private func commit() {
+        if selectedIndex == nil && addButton.sensitive {
+            commitNewCustom()
+            return
+        }
         guard let index = selectedIndex, index < descriptors.count else { return }
         let descriptor = descriptors[index]
         let engine = self.engine
@@ -477,6 +634,29 @@ final class AddInstrumentDialog {
             let instance = await engine.addInstrument(
                 kind: descriptor.kind,
                 sourceIdentifier: descriptor.sourceIdentifier,
+                configJSON: configJSON,
+                sessionID: sessionID
+            )
+            if let instance {
+                onAdded?(instance)
+            }
+        }
+        close()
+    }
+
+    private func commitNewCustom() {
+        let engine = self.engine
+        let sessionID = self.sessionID
+        let onAdded = self.onAdded
+        Task { @MainActor in
+            let def = engine.createCustomInstrument()
+            let configJSON = CustomInstrumentConfig(
+                defID: def.id,
+                features: CustomInstrumentLibrary.initialFeatureStates(for: def)
+            ).encode()
+            let instance = await engine.addInstrument(
+                kind: .custom,
+                sourceIdentifier: def.id.uuidString,
                 configJSON: configJSON,
                 sessionID: sessionID
             )

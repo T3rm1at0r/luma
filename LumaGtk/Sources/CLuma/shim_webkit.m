@@ -221,6 +221,27 @@ luma_monaco_view_load_uri(LumaMonacoView *view, const char *uri)
 }
 
 void
+luma_monaco_view_set_overlay_visible(LumaMonacoView *view, bool visible)
+{
+    if (!view->overlay_installed) {
+        return;
+    }
+    if (visible) {
+        NSWindow *parent = find_parent_window(view);
+        if (parent != nil && view->overlay_panel.parentWindow == nil) {
+            [parent addChildWindow:view->overlay_panel ordered:NSWindowAbove];
+        }
+        sync_overlay_frame(view);
+    } else {
+        NSWindow *parent = view->overlay_panel.parentWindow;
+        if (parent != nil) {
+            [parent removeChildWindow:view->overlay_panel];
+        }
+        [view->overlay_panel orderOut:nil];
+    }
+}
+
+void
 luma_monaco_view_evaluate(LumaMonacoView *view, const char *script_utf8)
 {
     NSString *script = [NSString stringWithUTF8String:script_utf8];
