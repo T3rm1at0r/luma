@@ -348,23 +348,27 @@ final class MainWindow {
 
     private func applyEventStreamLayout() {
         let host = eventStreamHost!
-        var c = host.firstChild
-        while let cur = c {
-            c = cur.nextSibling
-            host.remove(child: cur)
+        if eventStreamPaned.startChild == nil {
+            eventStreamPaned.startChild = WidgetRef(detailHost!)
         }
-        // Detach children from any prior parent (Paned holds raw refs).
-        let detail = detailHost!
+        if host.firstChild == nil {
+            host.append(child: eventStreamPaned)
+        }
         let stream = eventStreamPane.widget
-        eventStreamPaned.startChild = nil
-        eventStreamPaned.endChild = nil
-
         if eventStreamPane.collapsed {
-            host.append(child: detail)
-            host.append(child: stream)
+            if eventStreamPaned.endChild != nil {
+                eventStreamPaned.endChild = nil
+            }
+            if stream.parent == nil {
+                host.append(child: stream)
+            }
         } else {
-            eventStreamPaned.startChild = WidgetRef(detail)
-            eventStreamPaned.endChild = WidgetRef(stream)
+            if stream.parent != nil {
+                host.remove(child: stream)
+            }
+            if eventStreamPaned.endChild == nil {
+                eventStreamPaned.endChild = WidgetRef(stream)
+            }
             var totalHeight = Int(eventStreamPaned.height)
             if totalHeight <= 0 {
                 totalHeight = LumaState.shared.windowHeight
@@ -372,7 +376,6 @@ final class MainWindow {
             let saved = LumaState.shared.eventStreamSashPosition
             let defaultPosition = max(0, (totalHeight * 3) / 4)
             eventStreamPaned.position = Int(saved ?? defaultPosition)
-            host.append(child: eventStreamPaned)
         }
     }
 
@@ -577,10 +580,14 @@ final class MainWindow {
     private func buildNotebookSection() -> Box {
         notebookListBox.selectionMode = .single
         notebookListBox.add(cssClass: "navigation-sidebar")
+        notebookListBox.onRowActivated { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.select(.notebook) }
+        }
         notebookListBox.onRowSelected { [weak self] _, row in
             MainActor.assumeIsolated {
-                guard row != nil else { return }
-                self?.select(.notebook)
+                guard let self, row != nil else { return }
+                if case .notebook = self.selection { return }
+                self.notebookListBox.unselectAll()
             }
         }
 
@@ -1352,6 +1359,7 @@ final class MainWindow {
             sessionsList.unselectAll()
             packagesList.unselectAll()
             customInstrumentsList.unselectAll()
+            notebookListBox.select(row: notebookRow)
         case .session, .repl, .instrument, .insight, .itraceCapture:
             notebookListBox.unselectAll()
             packagesList.unselectAll()
