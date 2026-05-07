@@ -62,6 +62,7 @@ final class ITraceDetailView {
         headerRow.hexpand = true
 
         let headerLeft = Box(orientation: .vertical, spacing: 0)
+        headerLeft.hexpand = true
         let titleLabel = Label(str: trace.displayName)
         titleLabel.halign = .start
         titleLabel.add(cssClass: "title-3")
@@ -98,7 +99,6 @@ final class ITraceDetailView {
             let btn = Button(label: "Compare with\u{2026}")
             btn.valign = .center
             pendingCompareButton = btn
-            headerLeft.hexpand = true
             headerRow.append(child: btn)
         }
 
