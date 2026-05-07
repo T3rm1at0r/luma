@@ -150,18 +150,17 @@ final class ModuleSymbolsPane {
                     title: export.name,
                     typeLabel: export.kind.rawValue,
                     address: export.address,
-                    context: addressContext(for: export.kind)
+                    context: exportContext(export)
                 ))
             }
         case .imports:
             for imp in bundle.imports {
                 let typeLabel = [imp.kind?.rawValue, imp.module].compactMap { $0 }.joined(separator: " · ")
-                let context = imp.kind.map(addressContext(for:)) ?? AddressContext()
                 list.append(child: makeRow(
                     title: imp.name,
                     typeLabel: typeLabel.isEmpty ? "import" : typeLabel,
                     address: imp.address,
-                    context: context
+                    context: importContext(imp)
                 ))
             }
         case .symbols:
@@ -171,7 +170,7 @@ final class ModuleSymbolsPane {
                     title: sym.name,
                     typeLabel: typeLabel,
                     address: sym.address,
-                    context: addressContext(for: sym)
+                    context: symbolContext(sym)
                 ))
             }
         }
@@ -240,15 +239,30 @@ final class ModuleSymbolsPane {
     }
 }
 
-private func addressContext(for kind: LumaCore.ModuleSymbolBundle.SymbolKind) -> AddressContext {
-    switch kind {
-    case .function: return AddressContext(kind: .function, typeHint: "function")
-    case .variable: return AddressContext(kind: .data, typeHint: "variable")
+extension ModuleSymbolsPane {
+    fileprivate func exportContext(_ export: LumaCore.ModuleSymbolBundle.Export) -> AddressContext {
+        AddressContext(
+            kind: export.kind == .function ? .function : .data,
+            typeHint: export.kind.rawValue,
+            anchorHint: .moduleExport(name: module.name, export: export.name)
+        )
     }
-}
 
-private func addressContext(for symbol: LumaCore.ModuleSymbolBundle.Symbol) -> AddressContext {
-    if symbol.isCode { return AddressContext(kind: .function, typeHint: symbol.type) }
-    if symbol.isData { return AddressContext(kind: .data, typeHint: symbol.type) }
-    return AddressContext(kind: .unspecified, typeHint: symbol.type)
+    fileprivate func importContext(_ imp: LumaCore.ModuleSymbolBundle.Import) -> AddressContext {
+        let kind: AddressContext.Kind
+        switch imp.kind {
+        case .function: kind = .function
+        case .variable: kind = .data
+        case nil: kind = .unspecified
+        }
+        let anchorHint: AddressAnchor? = imp.module.map { .moduleExport(name: $0, export: imp.name) }
+        return AddressContext(kind: kind, typeHint: imp.kind?.rawValue, anchorHint: anchorHint)
+    }
+
+    fileprivate func symbolContext(_ symbol: LumaCore.ModuleSymbolBundle.Symbol) -> AddressContext {
+        let kind: AddressContext.Kind = symbol.isCode
+            ? .function
+            : (symbol.isData ? .data : .unspecified)
+        return AddressContext(kind: kind, typeHint: symbol.type)
+    }
 }
