@@ -1183,14 +1183,13 @@ final class MainWindow {
         column.hexpand = true
         column.vexpand = true
 
-        if SessionDetachedBanner.shouldShow(for: session) {
-            let banner = SessionDetachedBanner.make(for: session) { [weak self] in
-                self?.reestablishSession(id: session.id)
-            }
-            column.append(child: banner)
-        }
-
         guard let engine else {
+            if SessionDetachedBanner.shouldShow(for: session) {
+                let banner = SessionDetachedBanner.make(for: session) { [weak self] in
+                    self?.reestablishSession(id: session.id)
+                }
+                column.append(child: banner)
+            }
             let subtitle = "\(session.deviceName) · pid \(session.lastKnownPID)"
             column.append(child: makePlaceholder(title: session.processName, subtitle: subtitle))
             return column
@@ -1206,6 +1205,10 @@ final class MainWindow {
             detail = SessionDetailView(engine: engine, session: session)
             sessionDetailViews[session.id] = detail
         }
+        detail.onReestablish = { [weak self] in
+            self?.reestablishSession(id: session.id)
+        }
+        detail.applySessionState()
         column.append(child: detail.widget)
         return column
     }
@@ -1393,6 +1396,7 @@ final class MainWindow {
             }
             currentInstrumentDetail?.applySessionState()
             currentInsightDetail?.applySessionState()
+            sessionDetailViews[session.id]?.applySessionState()
             if currentCollabHeaderSessionID == session.id {
                 currentCollabHeader?.applySessionState()
             }

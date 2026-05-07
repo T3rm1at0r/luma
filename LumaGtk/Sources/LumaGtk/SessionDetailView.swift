@@ -8,9 +8,13 @@ import LumaCore
 final class SessionDetailView {
     let widget: Box
 
+    var onReestablish: (() -> Void)?
+
     private weak var engine: Engine?
     private let sessionID: UUID
 
+    private let bannerSlot: Box
+    private var currentBanner: Adw.Banner?
     private let titleLabel: Label
     private let sectionBar: Box
     private let summaryButton: ToggleButton
@@ -33,6 +37,7 @@ final class SessionDetailView {
 
     private var modulesTask: Task<Void, Never>?
     private var threadsTask: Task<Void, Never>?
+    private var lastNodeAvailable: Bool = false
 
     private var currentSortedModules: [LumaCore.ProcessModule] = []
     private var currentSortedThreads: [LumaCore.ProcessThread] = []
@@ -48,13 +53,19 @@ final class SessionDetailView {
         self.engine = engine
         self.sessionID = session.id
 
-        widget = Box(orientation: .vertical, spacing: 12)
-        widget.marginStart = 16
-        widget.marginEnd = 16
-        widget.marginTop = 16
-        widget.marginBottom = 16
+        widget = Box(orientation: .vertical, spacing: 0)
         widget.hexpand = true
         widget.vexpand = true
+
+        bannerSlot = Box(orientation: .vertical, spacing: 0)
+
+        let body = Box(orientation: .vertical, spacing: 12)
+        body.marginStart = 16
+        body.marginEnd = 16
+        body.marginTop = 16
+        body.marginBottom = 16
+        body.hexpand = true
+        body.vexpand = true
 
         titleLabel = Label(str: session.processName)
         titleLabel.halign = .start
@@ -141,12 +152,16 @@ final class SessionDetailView {
         threadsPane.hexpand = true
         threadsPane.vexpand = true
 
-        widget.append(child: titleLabel)
-        widget.append(child: sectionBar)
-        widget.append(child: contentSlot)
+        body.append(child: titleLabel)
+        body.append(child: sectionBar)
+        body.append(child: contentSlot)
+
+        widget.append(child: bannerSlot)
+        widget.append(child: body)
 
         rebuildSummary(session: session)
         showSection(.summary)
+        applyBanner(for: session)
         observeNode()
 
         summaryButton.onToggled { [weak self] _ in
@@ -202,12 +217,44 @@ final class SessionDetailView {
         }
     }
 
+    func applySessionState() {
+        guard let session = engine?.session(id: sessionID) else { return }
+        titleLabel.label = session.processName
+        rebuildSummary(session: session)
+        applyBanner(for: session)
+
+        let nodeAvailable = engine?.node(forSessionID: sessionID) != nil
+        if nodeAvailable != lastNodeAvailable {
+            observeNode()
+        }
+    }
+
+    private func applyBanner(for session: LumaCore.ProcessSession) {
+        if let existing = currentBanner {
+            bannerSlot.remove(child: existing)
+            currentBanner = nil
+        }
+        guard SessionDetachedBanner.shouldShow(for: session) else { return }
+        let banner = SessionDetachedBanner.make(for: session) { [weak self] in
+            self?.onReestablish?()
+        }
+        bannerSlot.append(child: banner)
+        currentBanner = banner
+    }
+
     private func observeNode() {
+        modulesTask?.cancel()
+        threadsTask?.cancel()
+        modulesTask = nil
+        threadsTask = nil
+
         guard let node = engine?.node(forSessionID: sessionID) else {
+            lastNodeAvailable = false
             renderModules([])
             renderThreads(persistedThreads())
             return
         }
+        lastNodeAvailable = true
 
         renderModules(node.modules)
         renderThreads(node.threads)
