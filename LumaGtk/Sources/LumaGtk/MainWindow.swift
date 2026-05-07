@@ -39,7 +39,8 @@ final class MainWindow {
     private var currentInsightDetail: InsightDetailView?
     private var currentInsightID: UUID?
     private var currentITraceDetail: ITraceDetailView?
-    private var currentITraceCaptureID: UUID?
+    private var currentITraceID: UUID?
+    private var sessionDetailViews: [UUID: SessionDetailView] = [:]
     private var currentCollabHeader: SessionCollaborationHeader?
     private var currentCollabHeaderSessionID: UUID?
     private(set) lazy var sharedTracerEditor: MonacoEditor = makeSharedTracerEditor()
@@ -50,12 +51,13 @@ final class MainWindow {
     private var installedPackages: [LumaCore.InstalledPackage] = []
     private var instrumentsBySession: [UUID: [LumaCore.InstrumentInstance]] = [:]
     private var insightsBySession: [UUID: [LumaCore.AddressInsight]] = [:]
-    private var capturesBySession: [UUID: [LumaCore.ITraceCaptureRecord]] = [:]
+    private var tracesBySession: [UUID: [LumaCore.ITrace]] = [:]
     private var sessionsRowKinds: [SessionsRow] = []
     private var sessionNameLabels: [UUID: Label] = [:]
     private var sessionDeviceLabels: [UUID: Label] = [:]
     private var instrumentRowLabels: [UUID: Label] = [:]
     private var instrumentRowIconHosts: [UUID: Box] = [:]
+    private var traceRowIcons: [UUID: Gtk.Image] = [:]
     private var selection: SidebarSelection = .notebook
     private var addInstrumentButton: Button!
     private var resumeProcessButton: Button!
@@ -76,7 +78,7 @@ final class MainWindow {
         case repl(UUID)
         case instrument(sessionID: UUID, instrumentID: UUID)
         case insight(sessionID: UUID, insightID: UUID)
-        case itraceCapture(sessionID: UUID, captureID: UUID)
+        case itrace(sessionID: UUID, traceID: UUID)
         case package(UUID)
         case customInstrumentDef(UUID)
     }
@@ -86,12 +88,12 @@ final class MainWindow {
         case repl(UUID)
         case instrument(sessionID: UUID, instrumentID: UUID)
         case insight(sessionID: UUID, insightID: UUID)
-        case itraceCapture(sessionID: UUID, captureID: UUID)
+        case itrace(sessionID: UUID, traceID: UUID)
 
         var sessionID: UUID {
             switch self {
             case .session(let id), .repl(let id): return id
-            case .instrument(let id, _), .insight(let id, _), .itraceCapture(let id, _): return id
+            case .instrument(let id, _), .insight(let id, _), .itrace(let id, _): return id
             }
         }
     }
@@ -428,6 +430,9 @@ final class MainWindow {
         AddressActionMenu.errorReporter = { [weak self] message in
             self?.showToast(message)
         }
+        AddressActionMenu.navigateToTarget = { [weak self] target in
+            self?.navigate(to: target)
+        }
         InsightDetailView.copyFeedback = { [weak self] message in
             self?.showToast(message, durationSeconds: 1.0)
         }
@@ -626,8 +631,8 @@ final class MainWindow {
                     self.select(.instrument(sessionID: sid, instrumentID: iid))
                 case .insight(let sid, let iid):
                     self.select(.insight(sessionID: sid, insightID: iid))
-                case .itraceCapture(let sid, let cid):
-                    self.select(.itraceCapture(sessionID: sid, captureID: cid))
+                case .itrace(let sid, let tid):
+                    self.select(.itrace(sessionID: sid, traceID: tid))
                 }
             }
         }
@@ -936,14 +941,14 @@ final class MainWindow {
             currentInsightDetail = nil
             currentInsightID = nil
         }
-        if case .itraceCapture(_, let cid) = selection {
-            if currentITraceCaptureID != cid {
+        if case .itrace(_, let tid) = selection {
+            if currentITraceID != tid {
                 currentITraceDetail = nil
-                currentITraceCaptureID = nil
+                currentITraceID = nil
             }
         } else {
             currentITraceDetail = nil
-            currentITraceCaptureID = nil
+            currentITraceID = nil
         }
         if case .customInstrumentDef(let defID) = selection {
             if currentCustomInstrumentDefPane?.def.id != defID {
@@ -1005,30 +1010,30 @@ final class MainWindow {
                     subtitle: "This insight is no longer in the store."
                 )
             }
-        case .itraceCapture(let sid, let cid):
-            let cached = capturesBySession[sid]
-            let allCaptures = cached ?? (try? engine?.store.fetchITraceCaptures(sessionID: sid)) ?? []
-            if let capture = allCaptures.first(where: { $0.id == cid }), let engine {
+        case .itrace(let sid, let tid):
+            let cached = tracesBySession[sid]
+            let allTraces = cached ?? (try? engine?.store.fetchITraces(sessionID: sid)) ?? []
+            if let trace = allTraces.first(where: { $0.id == tid }), let engine {
                 let detail: ITraceDetailView
-                if let existing = currentITraceDetail, currentITraceCaptureID == cid {
+                if let existing = currentITraceDetail, currentITraceID == tid {
                     detail = existing
                 } else {
-                    let others = allCaptures.filter { $0.id != cid }
+                    let others = allTraces.filter { $0.id != tid }
                     detail = ITraceDetailView(
-                        capture: capture,
-                        otherCaptures: others,
+                        trace: trace,
+                        otherTraces: others,
                         engine: engine,
                         sessionID: sid
                     )
                     currentITraceDetail = detail
-                    currentITraceCaptureID = cid
+                    currentITraceID = tid
                 }
                 widget = detail.widget
             } else {
                 widget = MainWindow.makeEmptyState(
                     icon: "system-run-symbolic",
-                    title: "Capture unavailable",
-                    subtitle: "This ITrace capture is no longer in the store."
+                    title: "Trace unavailable",
+                    subtitle: "This ITrace is no longer in the store."
                 )
             }
         case .instrument(let sid, let iid):
@@ -1117,7 +1122,7 @@ final class MainWindow {
         switch selection {
         case .session(let id), .repl(let id):
             return id
-        case .instrument(let id, _), .insight(let id, _), .itraceCapture(let id, _):
+        case .instrument(let id, _), .insight(let id, _), .itrace(let id, _):
             return id
         default:
             return nil
@@ -1185,8 +1190,23 @@ final class MainWindow {
             column.append(child: banner)
         }
 
-        let subtitle = "\(session.deviceName) · pid \(session.lastKnownPID)"
-        column.append(child: makePlaceholder(title: session.processName, subtitle: subtitle))
+        guard let engine else {
+            let subtitle = "\(session.deviceName) · pid \(session.lastKnownPID)"
+            column.append(child: makePlaceholder(title: session.processName, subtitle: subtitle))
+            return column
+        }
+
+        let detail: SessionDetailView
+        if let cached = sessionDetailViews[session.id] {
+            detail = cached
+            if detail.widget.parent != nil {
+                detail.widget.unparent()
+            }
+        } else {
+            detail = SessionDetailView(engine: engine, session: session)
+            sessionDetailViews[session.id] = detail
+        }
+        column.append(child: detail.widget)
         return column
     }
 
@@ -1326,7 +1346,7 @@ final class MainWindow {
             packagesList.unselectAll()
             customInstrumentsList.unselectAll()
             notebookListBox.select(row: notebookRow)
-        case .session, .repl, .instrument, .insight, .itraceCapture:
+        case .session, .repl, .instrument, .insight, .itrace:
             notebookListBox.unselectAll()
             packagesList.unselectAll()
             customInstrumentsList.unselectAll()
@@ -1384,11 +1404,15 @@ final class MainWindow {
             }
             instrumentsBySession.removeValue(forKey: id)
             insightsBySession.removeValue(forKey: id)
-            capturesBySession.removeValue(forKey: id)
+            for trace in tracesBySession[id] ?? [] {
+                traceRowIcons.removeValue(forKey: trace.id)
+            }
+            tracesBySession.removeValue(forKey: id)
+            sessionDetailViews.removeValue(forKey: id)
             sessionNameLabels.removeValue(forKey: id)
             sessionDeviceLabels.removeValue(forKey: id)
             switch selection {
-            case .session(let sid), .repl(let sid), .instrument(let sid, _), .insight(let sid, _), .itraceCapture(let sid, _):
+            case .session(let sid), .repl(let sid), .instrument(let sid, _), .insight(let sid, _), .itrace(let sid, _):
                 if sid == id {
                     select(.notebook)
                     notebookListBox.select(row: notebookRow)
@@ -1421,13 +1445,13 @@ final class MainWindow {
             if case .insight(_, let iid) = selection, iid == id {
                 select(.repl(sessionID))
             }
-        case .captureAdded(let capture):
-            capturesBySession[capture.sessionID, default: []].append(capture)
-            insertChildRow(makeCaptureRow(capture), kind: .itraceCapture(sessionID: capture.sessionID, captureID: capture.id), sessionID: capture.sessionID)
-        case .captureRemoved(let id, let sessionID):
-            capturesBySession[sessionID]?.removeAll { $0.id == id }
-            removeChildRow(kind: .itraceCapture(sessionID: sessionID, captureID: id))
-            if case .itraceCapture(_, let cid) = selection, cid == id {
+        case .traceUpdated(let trace):
+            upsertTrace(trace)
+        case .traceRemoved(let id, let sessionID):
+            tracesBySession[sessionID]?.removeAll { $0.id == id }
+            traceRowIcons.removeValue(forKey: id)
+            removeChildRow(kind: .itrace(sessionID: sessionID, traceID: id))
+            if case .itrace(_, let tid) = selection, tid == id {
                 select(.repl(sessionID))
             }
         case .descriptorsChanged, .customInstrumentDefsChanged:
@@ -1533,7 +1557,7 @@ final class MainWindow {
             case .repl: return 1
             case .instrument: return 2
             case .insight: return 3
-            case .itraceCapture: return 4
+            case .itrace: return 4
             }
         }
         let target = kindOrder(kind)
@@ -1592,7 +1616,7 @@ final class MainWindow {
         return row
     }
 
-    private func makeCaptureRow(_ capture: LumaCore.ITraceCaptureRecord) -> ListBoxRow {
+    private func makeTraceRow(_ trace: LumaCore.ITrace) -> ListBoxRow {
         let row = ListBoxRow()
         let rowBox = Box(orientation: .horizontal, spacing: 6)
         rowBox.halign = .start
@@ -1600,15 +1624,40 @@ final class MainWindow {
         rowBox.marginEnd = 12
         rowBox.marginTop = 2
         rowBox.marginBottom = 2
-        let iconImage = Gtk.Image(iconName: "system-run-symbolic")
+        let iconImage = Gtk.Image(iconName: traceIconName(for: trace))
         iconImage.pixelSize = 16
+        traceRowIcons[trace.id] = iconImage
         rowBox.append(child: iconImage)
-        let lbl = Label(str: capture.displayName)
+        let lbl = Label(str: trace.displayName)
         lbl.halign = .start
         rowBox.append(child: lbl)
         row.set(child: rowBox)
-        attachCaptureContextMenu(row: row, anchor: rowBox, capture: capture)
+        attachTraceContextMenu(row: row, anchor: rowBox, trace: trace)
         return row
+    }
+
+    private func traceIconName(for trace: LumaCore.ITrace) -> String {
+        trace.isRunning ? "media-record-symbolic" : "system-run-symbolic"
+    }
+
+    private func upsertTrace(_ trace: LumaCore.ITrace) {
+        var traces = tracesBySession[trace.sessionID] ?? []
+        if let idx = traces.firstIndex(where: { $0.id == trace.id }) {
+            traces[idx] = trace
+            tracesBySession[trace.sessionID] = traces
+            traceRowIcons[trace.id]?.set(iconName: traceIconName(for: trace))
+            if let detail = currentITraceDetail, currentITraceID == trace.id {
+                detail.update(with: trace)
+            }
+            return
+        }
+        traces.append(trace)
+        tracesBySession[trace.sessionID] = traces
+        insertChildRow(
+            makeTraceRow(trace),
+            kind: .itrace(sessionID: trace.sessionID, traceID: trace.id),
+            sessionID: trace.sessionID
+        )
     }
 
     private func makeSessionIcon(
@@ -1777,30 +1826,30 @@ final class MainWindow {
         ], at: anchor, x: x, y: y)
     }
 
-    private func attachCaptureContextMenu(
+    private func attachTraceContextMenu(
         row: ListBoxRow,
         anchor: Widget,
-        capture: LumaCore.ITraceCaptureRecord
+        trace: LumaCore.ITrace
     ) {
         let click = GestureClick()
         click.set(button: 3)
         click.onPressed { [weak self, anchor] _, _, x, y in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.presentCaptureContextMenu(anchor: anchor, x: x, y: y, capture: capture)
+                self.presentTraceContextMenu(anchor: anchor, x: x, y: y, trace: trace)
             }
         }
         row.install(controller: click)
     }
 
-    private func presentCaptureContextMenu(
+    private func presentTraceContextMenu(
         anchor: Widget,
         x: Double,
         y: Double,
-        capture: LumaCore.ITraceCaptureRecord
+        trace: LumaCore.ITrace
     ) {
         ContextMenu.present([
-            [.init("Delete Capture", destructive: true) { [weak self] in self?.confirmDeleteCapture(capture) }],
+            [.init("Delete Trace", destructive: true) { [weak self] in self?.confirmDeleteTrace(trace) }],
         ], at: anchor, x: x, y: y)
     }
 
@@ -1857,14 +1906,14 @@ final class MainWindow {
         }
     }
 
-    private func confirmDeleteCapture(_ capture: LumaCore.ITraceCaptureRecord) {
+    private func confirmDeleteTrace(_ trace: LumaCore.ITrace) {
         confirmDestructive(
-            message: "Delete capture \(capture.displayName)?",
+            message: "Delete trace \(trace.displayName)?",
             detail: "This removes the recorded ITrace data from the project.",
             destructiveLabel: "Delete"
         ) { [weak self] in
-            self?.engine?.deleteCapture(id: capture.id, sessionID: capture.sessionID)
-            self?.showToast("Deleted capture")
+            self?.engine?.deleteITrace(id: trace.id, sessionID: trace.sessionID)
+            self?.showToast("Deleted trace")
         }
     }
 
@@ -1912,9 +1961,9 @@ final class MainWindow {
                 if case .insight(_, let i) = $0 { return i == id }
                 return false
             }
-        case .itraceCapture(_, let id):
+        case .itrace(_, let id):
             return sessionsRowKinds.firstIndex {
-                if case .itraceCapture(_, let c) = $0 { return c == id }
+                if case .itrace(_, let t) = $0 { return t == id }
                 return false
             }
         default:

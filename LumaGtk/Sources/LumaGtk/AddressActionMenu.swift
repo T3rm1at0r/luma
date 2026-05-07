@@ -8,33 +8,57 @@ import LumaCore
 enum AddressActionMenu {
     static var navigator: ((UUID, UUID) -> Void)?
     static var errorReporter: ((String) -> Void)?
+    static var navigateToTarget: ((LumaCore.NavigationTarget) -> Void)?
 
-    static func attach(to anchor: Widget, engine: Engine, sessionID: UUID, address: UInt64) {
+    static func attach(
+        to anchor: Widget,
+        engine: Engine,
+        sessionID: UUID,
+        address: UInt64,
+        context: AddressContext = AddressContext()
+    ) {
         let gesture = GestureClick()
         gesture.set(button: 3)
         gesture.propagationPhase = GTK_PHASE_CAPTURE
         gesture.onPressed { [anchor] _, _, x, y in
             MainActor.assumeIsolated {
-                present(at: anchor, x: x, y: y, engine: engine, sessionID: sessionID, address: address)
+                present(at: anchor, x: x, y: y, engine: engine, sessionID: sessionID, address: address, context: context)
             }
         }
         anchor.install(controller: gesture)
     }
 
-    private static func present(at anchor: Widget, x: Double, y: Double, engine: Engine, sessionID: UUID, address: UInt64) {
-        ContextMenu.present([
-            [
-                .init("Open Memory") {
-                    openInsight(engine: engine, sessionID: sessionID, address: address, kind: .memory, failureLabel: "Can\u{2019}t open memory")
-                },
-                .init("Open Disassembly") {
-                    openInsight(engine: engine, sessionID: sessionID, address: address, kind: .disassembly, failureLabel: "Can\u{2019}t open disassembly")
-                },
-            ],
-        ], at: anchor, x: x, y: y)
+    static func present(
+        at anchor: Widget,
+        x: Double,
+        y: Double,
+        engine: Engine,
+        sessionID: UUID,
+        address: UInt64,
+        context: AddressContext = AddressContext()
+    ) {
+        var items: [ContextMenu.Item] = [
+            .init("Open Memory") {
+                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .memory, failureLabel: "Can\u{2019}t open memory")
+            },
+            .init("Open Disassembly") {
+                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .disassembly, failureLabel: "Can\u{2019}t open disassembly")
+            },
+        ]
+
+        for action in engine.addressActions(sessionID: sessionID, address: address, context: context) {
+            items.append(ContextMenu.Item(action.title, destructive: action.role == .destructive) {
+                Task { @MainActor in
+                    guard let target = await action.perform() else { return }
+                    navigateToTarget?(target)
+                }
+            })
+        }
+
+        ContextMenu.present([items], at: anchor, x: x, y: y)
     }
 
-    private static func openInsight(
+    static func openInsight(
         engine: Engine,
         sessionID: UUID,
         address: UInt64,
