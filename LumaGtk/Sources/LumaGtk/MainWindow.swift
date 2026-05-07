@@ -520,7 +520,7 @@ final class MainWindow {
         } else {
             engine.createSession(session)
         }
-        select(.repl(session.id))
+        select(.session(session.id))
         Task { @MainActor in
             await engine.spawnAndAttach(device: device, session: session)
             self.refreshAfterAttach(sessionID: session.id)
@@ -549,7 +549,7 @@ final class MainWindow {
         } else {
             engine.createSession(session)
         }
-        select(.repl(session.id))
+        select(.session(session.id))
         Task { @MainActor in
             await engine.attach(device: device, process: process, session: session)
             self.refreshAfterAttach(sessionID: session.id)
@@ -1445,7 +1445,7 @@ final class MainWindow {
             insightsBySession[sessionID]?.removeAll { $0.id == id }
             removeChildRow(kind: .insight(sessionID: sessionID, insightID: id))
             if case .insight(_, let iid) = selection, iid == id {
-                select(.repl(sessionID))
+                select(.session(sessionID))
             }
         case .traceUpdated(let trace):
             upsertTrace(trace)
@@ -1454,7 +1454,7 @@ final class MainWindow {
             traceRowIcons.removeValue(forKey: id)
             removeChildRow(kind: .itrace(sessionID: sessionID, traceID: id))
             if case .itrace(_, let tid) = selection, tid == id {
-                select(.repl(sessionID))
+                select(.session(sessionID))
             }
         case .descriptorsChanged, .customInstrumentDefsChanged:
             refreshInstrumentRowVisuals()
