@@ -20,7 +20,9 @@ struct ModuleDetailView: View {
         var id: String { rawValue }
     }
 
-    private var bundle: LumaCore.ModuleSymbolBundle? { bundles[module.id] }
+    private var displayBundle: LumaCore.ModuleSymbolBundle {
+        bundles[module.id] ?? LumaCore.ModuleSymbolBundle()
+    }
     private var loadError: String? { loadErrors[module.id] }
 
     var body: some View {
@@ -35,9 +37,8 @@ struct ModuleDetailView: View {
 
             content
         }
-        .padding(.top, 8)
         .task(id: module.id) {
-            guard bundle == nil, loadError == nil else { return }
+            guard bundles[module.id] == nil, loadError == nil else { return }
             await load(module)
         }
     }
@@ -46,19 +47,17 @@ struct ModuleDetailView: View {
     private var content: some View {
         if let loadError {
             Text(loadError).foregroundStyle(.red)
-        } else if let bundle {
-            switch tab {
-            case .exports: exportsTable(bundle.exports)
-            case .imports: importsTable(bundle.imports)
-            case .symbols: symbolsTable(bundle.symbols)
-            }
         } else {
-            ProgressView().frame(maxWidth: .infinity)
+            switch tab {
+            case .exports: exportsTable(displayBundle.exports)
+            case .imports: importsTable(displayBundle.imports)
+            case .symbols: symbolsTable(displayBundle.symbols)
+            }
         }
     }
 
     private func label(for tab: Tab) -> String {
-        guard let bundle else { return tab.rawValue }
+        guard let bundle = bundles[module.id] else { return tab.rawValue }
         switch tab {
         case .exports: return "Exports (\(bundle.exports.count))"
         case .imports: return "Imports (\(bundle.imports.count))"
@@ -80,12 +79,12 @@ struct ModuleDetailView: View {
                 addressMenu(
                     address: row.address,
                     title: row.name,
-                    context: addressContext(for: row.kind)
+                    context: addressContext(for: row)
                 )
             }
         } primaryAction: { ids in
             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
-                openInsight(at: row.address, title: row.name, context: addressContext(for: row.kind))
+                openInsight(at: row.address, title: row.name, context: addressContext(for: row))
             }
         }
     }
@@ -112,7 +111,7 @@ struct ModuleDetailView: View {
                 addressMenu(
                     address: address,
                     title: row.name,
-                    context: row.kind.map(addressContext(for:)) ?? AddressContext()
+                    context: addressContext(for: row)
                 )
             }
         } primaryAction: { ids in
@@ -123,7 +122,7 @@ struct ModuleDetailView: View {
                 openInsight(
                     at: address,
                     title: row.name,
-                    context: row.kind.map(addressContext(for:)) ?? AddressContext()
+                    context: addressContext(for: row)
                 )
             }
         }
@@ -242,27 +241,30 @@ struct ModuleDetailView: View {
     }
 }
 
-private func addressContext(for kind: LumaCore.ModuleSymbolBundle.SymbolKind) -> AddressContext {
-    switch kind {
-    case .function: return AddressContext(kind: .function, typeHint: "function")
-    case .variable: return AddressContext(kind: .data, typeHint: "variable")
+extension ModuleDetailView {
+    fileprivate func addressContext(for export: LumaCore.ModuleSymbolBundle.Export) -> AddressContext {
+        AddressContext(
+            kind: export.kind == .function ? .function : .data,
+            typeHint: export.kind.rawValue,
+            anchorHint: .moduleExport(name: module.name, export: export.name)
+        )
     }
-}
 
-private func addressContext(for symbol: LumaCore.ModuleSymbolBundle.Symbol) -> AddressContext {
-    if symbol.isCode {
-        return AddressContext(kind: .function, typeHint: symbol.type)
+    fileprivate func addressContext(for imp: LumaCore.ModuleSymbolBundle.Import) -> AddressContext {
+        let kind: AddressContext.Kind
+        switch imp.kind {
+        case .function: kind = .function
+        case .variable: kind = .data
+        case nil: kind = .unspecified
+        }
+        let anchorHint: AddressAnchor? = imp.module.map { .moduleExport(name: $0, export: imp.name) }
+        return AddressContext(kind: kind, typeHint: imp.kind?.rawValue, anchorHint: anchorHint)
     }
-    if symbol.isData {
-        return AddressContext(kind: .data, typeHint: symbol.type)
+
+    fileprivate func addressContext(for symbol: LumaCore.ModuleSymbolBundle.Symbol) -> AddressContext {
+        let kind: AddressContext.Kind = symbol.isCode
+            ? .function
+            : (symbol.isData ? .data : .unspecified)
+        return AddressContext(kind: kind, typeHint: symbol.type)
     }
-    return AddressContext(kind: .unspecified, typeHint: symbol.type)
-}
-
-private func defaultInsightLabel(for context: AddressContext) -> String {
-    context.kind == .data ? "Open Memory" : "Open Disassembly"
-}
-
-private func defaultInsightIcon(for context: AddressContext) -> String {
-    context.kind == .data ? "doc.text.magnifyingglass" : "hammer"
 }
