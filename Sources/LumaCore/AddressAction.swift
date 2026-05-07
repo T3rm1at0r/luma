@@ -2,6 +2,24 @@ import Foundation
 
 public enum NavigationTarget: Sendable, Hashable {
     case instrumentComponent(sessionID: UUID, instrumentID: UUID, componentID: UUID)
+    case itrace(sessionID: UUID, traceID: UUID)
+}
+
+public struct AddressContext: Sendable, Hashable {
+    public enum Kind: Sendable, Hashable {
+        case unspecified
+        case code
+        case function
+        case data
+    }
+
+    public var kind: Kind
+    public var typeHint: String?
+
+    public init(kind: Kind = .unspecified, typeHint: String? = nil) {
+        self.kind = kind
+        self.typeHint = typeHint
+    }
 }
 
 public struct AddressAction: Identifiable, Sendable {
@@ -31,4 +49,8 @@ public struct AddressAction: Identifiable, Sendable {
     }
 }
 
-public typealias AddressActionProvider = @MainActor @Sendable (_ sessionID: UUID, _ address: UInt64) -> [AddressAction]
+public typealias AddressActionProvider = @MainActor @Sendable (
+    _ sessionID: UUID,
+    _ address: UInt64,
+    _ context: AddressContext
+) -> [AddressAction]
