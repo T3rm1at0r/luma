@@ -20,6 +20,9 @@ public final class Engine {
     public let eventLog = EventLog()
 
     private var deviceEventTasks: [String: Task<Void, Never>] = [:]
+    private var gatingEnabledDevices: Set<String> = []
+    private var gatingIntendedDevices: Set<String> = []
+    private var deviceChangeWatcher: Task<Void, Never>?
     private var eventLogTask: Task<Void, Never>?
 
     public let hookPacks: HookPackLibrary
@@ -50,6 +53,7 @@ public final class Engine {
     @ObservationIgnored public var onREPLCellAdded: (@MainActor (REPLCell) -> Void)?
     @ObservationIgnored public var onNotebookChanged: (@MainActor (NotebookChange) -> Void)?
     @ObservationIgnored public var onInstalledPackagesChanged: (@MainActor ([InstalledPackage]) -> Void)?
+    @ObservationIgnored public var onUserNotification: (@MainActor (UserNotification) -> Void)?
     @ObservationIgnored private var sessionsObservation: StoreObservation?
     @ObservationIgnored private var notebookObservation: StoreObservation?
     @ObservationIgnored private var instrumentsObservation: StoreObservation?
@@ -356,6 +360,10 @@ public final class Engine {
             self?.applyRemoteSessionPhase(sessionID: sessionID, phase: phase, reason: reason)
         }
 
+        collaboration.onSessionArmingChanged = { [weak self] sessionID, armingState in
+            self?.applyRemoteSessionArming(sessionID: sessionID, armingState: armingState)
+        }
+
         collaboration.onSessionModulesUpdated = { [weak self] sessionID, delta in
             self?.applyRemoteSessionModules(sessionID: sessionID, delta: delta)
         }
@@ -652,6 +660,7 @@ public final class Engine {
             var record = sessions[idx]
             record.host = session.host
             record.phase = session.phase.toProcessSessionPhase
+            record.armingState = session.armingState
             record.processName = session.processName
             record.deviceID = session.deviceID
             record.deviceName = session.deviceName
@@ -671,7 +680,8 @@ public final class Engine {
                 deviceID: session.deviceID,
                 deviceName: session.deviceName,
                 processName: session.processName,
-                lastKnownPID: session.pid
+                lastKnownPID: session.pid,
+                armingState: session.armingState
             )
             record.phase = session.phase.toProcessSessionPhase
             record.lastKnownModules = session.modules
@@ -718,6 +728,16 @@ public final class Engine {
         guard let idx = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
         var updated = sessions[idx]
         updated.phase = phase.toProcessSessionPhase
+        saveSession(updated)
+    }
+
+    private func applyRemoteSessionArming(
+        sessionID: UUID,
+        armingState: ProcessSession.ArmingState
+    ) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        var updated = sessions[idx]
+        updated.armingState = armingState
         saveSession(updated)
     }
 
@@ -824,8 +844,21 @@ public final class Engine {
         }
 
         await loadRemoteDevices()
+        watchDevicesForGating()
         if let labID = CollaborationJoinQueue.shared.consumeNext() {
             startCollaboration(joiningLab: labID)
+        }
+    }
+
+    private func watchDevicesForGating() {
+        deviceChangeWatcher?.cancel()
+        deviceChangeWatcher = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await snapshot in await self.deviceManager.snapshots() {
+                for device in snapshot {
+                    await self.evaluateGating(forDeviceID: device.id)
+                }
+            }
         }
     }
 
@@ -1296,6 +1329,191 @@ public final class Engine {
         }
     }
 
+    // MARK: - Spawn Gating
+
+    public func armSession(id: UUID, matchPattern: String) async {
+        guard var session = try? store.fetchSession(id: id) else { return }
+        session.armingState = .armed(matchPattern: matchPattern, armedAt: Date())
+        clearGatingErrorIfPresent(&session)
+        saveSession(session)
+        broadcastArmingChangeIfHosting(session)
+        gatingIntendedDevices.insert(session.deviceID)
+        await evaluateGating(forDeviceID: session.deviceID)
+    }
+
+    public func disarmSession(id: UUID) async {
+        guard var session = try? store.fetchSession(id: id) else { return }
+        if case .armed(let pattern, _) = session.armingState {
+            session.lastArmPattern = pattern
+        }
+        session.armingState = .unarmed
+        clearGatingErrorIfPresent(&session)
+        saveSession(session)
+        broadcastArmingChangeIfHosting(session)
+        await evaluateGating(forDeviceID: session.deviceID)
+    }
+
+    private func clearGatingErrorIfPresent(_ session: inout ProcessSession) {
+        if session.lastError?.hasPrefix("Spawn gating couldn't be enabled") == true {
+            session.lastError = nil
+        }
+    }
+
+    @discardableResult
+    public func armNewSession(
+        device: Device,
+        config: SpawnConfig,
+        matchPattern: String
+    ) async -> ProcessSession {
+        let session = ProcessSession(
+            kind: .spawn(config),
+            deviceID: device.id,
+            deviceName: device.name,
+            processName: config.defaultDisplayName,
+            lastKnownPID: 0,
+            armingState: .armed(matchPattern: matchPattern, armedAt: Date())
+        )
+        createSession(session)
+        announceArmedSessionIfCollaborative(session)
+        gatingIntendedDevices.insert(device.id)
+        await evaluateGating(forDeviceID: device.id)
+        return session
+    }
+
+    private func broadcastArmingChangeIfHosting(_ session: ProcessSession) {
+        guard collaboration.isCollaborative,
+              localUserHosts(session.id),
+              let collabID = collabSessionID(forSessionID: session.id)
+        else { return }
+        collaboration.enqueueUpdateSessionArming(sessionID: collabID, armingState: session.armingState)
+    }
+
+    private func announceArmedSessionIfCollaborative(_ session: ProcessSession) {
+        guard collaboration.isCollaborative,
+              collaboration.isOwner,
+              let localUser = collaboration.localUser
+        else { return }
+        var stored = session
+        stored.host = localUser
+        saveSession(stored)
+        collaboration.enqueueAddSession(
+            sessionID: stored.id,
+            deviceID: stored.deviceID,
+            deviceName: stored.deviceName,
+            pid: stored.lastKnownPID,
+            processName: stored.processName
+        )
+        collaboration.enqueueUpdateSessionPhase(
+            sessionID: stored.id,
+            phase: .detached
+        )
+        collaboration.enqueueUpdateSessionArming(
+            sessionID: stored.id,
+            armingState: stored.armingState
+        )
+    }
+
+    public func resumeGating(forSessionID sessionID: UUID) async {
+        guard let session = sessions.first(where: { $0.id == sessionID }) else { return }
+        gatingIntendedDevices.insert(session.deviceID)
+        await evaluateGating(forDeviceID: session.deviceID)
+    }
+
+    public func isGatingActive(forDeviceID deviceID: String) -> Bool {
+        gatingEnabledDevices.contains(deviceID)
+    }
+
+    public func defaultArmPattern(for session: ProcessSession) -> String {
+        if case .armed(let pattern, _) = session.armingState {
+            return pattern
+        }
+        if let last = session.lastArmPattern, !last.isEmpty {
+            return last
+        }
+        let literal: String
+        switch session.kind {
+        case .spawn(let config): literal = config.programString
+        case .attach: literal = session.processName
+        }
+        return "^" + NSRegularExpression.escapedPattern(for: literal) + "$"
+    }
+
+    private func evaluateGating(forDeviceID deviceID: String) async {
+        let hasArmedSession = sessions.contains { session in
+            guard session.deviceID == deviceID else { return false }
+            if case .armed = session.armingState { return true }
+            return false
+        }
+        let shouldGate = hasArmedSession && gatingIntendedDevices.contains(deviceID)
+        let isGating = gatingEnabledDevices.contains(deviceID)
+        guard shouldGate != isGating else { return }
+        let devices = await deviceManager.currentDevices()
+        guard let device = devices.first(where: { $0.id == deviceID }) else {
+            gatingEnabledDevices.remove(deviceID)
+            return
+        }
+        do {
+            if shouldGate {
+                try await device.enableSpawnGating()
+                gatingEnabledDevices.insert(deviceID)
+                ensureDeviceEventsHooked(for: device)
+                clearGatingErrorOnArmedSessions(forDeviceID: deviceID)
+            } else {
+                try await device.disableSpawnGating()
+                gatingEnabledDevices.remove(deviceID)
+            }
+            notifyGatingChange(forDeviceID: deviceID)
+        } catch {
+            let reason = userFacingMessage(error)
+            if shouldGate {
+                notify(.error,
+                       "Couldn't enable spawn gating on \(device.name)",
+                       message: reason)
+                recordGatingErrorOnArmedSessions(forDeviceID: deviceID, reason: reason)
+            } else {
+                print("[Engine] failed to disable spawn gating on \(deviceID): \(reason)")
+            }
+        }
+    }
+
+    private func notifyGatingChange(forDeviceID deviceID: String) {
+        for session in sessions where session.deviceID == deviceID {
+            guard case .armed = session.armingState else { continue }
+            onSessionListChanged?(.sessionUpdated(session))
+        }
+    }
+
+    private func recordGatingErrorOnArmedSessions(forDeviceID deviceID: String, reason: String) {
+        let summary = "Spawn gating couldn't be enabled: \(reason)"
+        for session in sessions where session.deviceID == deviceID {
+            if case .armed = session.armingState {
+                updateSession(id: session.id) { $0.lastError = summary }
+            }
+        }
+    }
+
+    private func clearGatingErrorOnArmedSessions(forDeviceID deviceID: String) {
+        for session in sessions where session.deviceID == deviceID {
+            guard session.lastError?.hasPrefix("Spawn gating couldn't be enabled") == true else { continue }
+            updateSession(id: session.id) { $0.lastError = nil }
+        }
+    }
+
+    private func notify(
+        _ severity: UserNotification.Severity,
+        _ title: String,
+        message: String? = nil
+    ) {
+        onUserNotification?(UserNotification(severity: severity, title: title, message: message))
+    }
+
+    private func userFacingMessage(_ error: any Swift.Error) -> String {
+        if let fridaError = error as? Frida.Error {
+            return fridaError.description
+        }
+        return error.localizedDescription
+    }
+
     public func node(forSessionID sessionID: UUID) -> ProcessNode? {
         processNodes.first { $0.id == sessionID || $0.sessionID == sessionID }
     }
@@ -1346,12 +1564,18 @@ public final class Engine {
     }
 
     public func deleteSession(id: UUID) {
+        let removedDeviceID = sessions.first(where: { $0.id == id })?.deviceID
         if let node = node(forSessionID: id) {
             removeNode(node)
         }
         try? store.deleteSession(id: id)
         sessions.removeAll { $0.id == id }
         onSessionListChanged?(.sessionRemoved(id))
+        if let deviceID = removedDeviceID {
+            Task { @MainActor [weak self] in
+                await self?.evaluateGating(forDeviceID: deviceID)
+            }
+        }
     }
 
     public func deleteInsight(id: UUID, sessionID: UUID) {
@@ -2647,7 +2871,7 @@ public final class Engine {
                     switch event.source {
                     case .instrument, .console, .script:
                         self?.collaboration.sendEvent(sessionID: sid, event: event)
-                    case .repl, .processOutput:
+                    case .repl, .processOutput, .spawnGating:
                         break
                     }
                 }
@@ -2729,9 +2953,13 @@ public final class Engine {
                 case .output(let data, let fd, let pid):
                     self.handleDeviceOutput(device: device, data: data, fd: fd, pid: pid)
 
+                case .spawnAdded(let details):
+                    await self.handleSpawnAdded(device: device, details: details)
+
                 case .lost:
                     self.deviceEventTasks[device.id]?.cancel()
                     self.deviceEventTasks[device.id] = nil
+                    self.gatingEnabledDevices.remove(device.id)
                     return
 
                 default:
@@ -2753,6 +2981,118 @@ public final class Engine {
             ),
             data: data
         ))
+    }
+
+    private func handleSpawnAdded(device: Device, details: SpawnDetails) async {
+        let identifier = details.identifier ?? ""
+        let pid = details.pid
+        if let session = matchedArmedSession(forDeviceID: device.id, identifier: identifier) {
+            await attachToGatedSpawn(device: device, pid: pid, session: session)
+            emitSpawnGatingEvent(
+                device: device,
+                identifier: details.identifier,
+                pid: pid,
+                outcome: .captured,
+                sessionID: session.id
+            )
+        } else {
+            try? await device.resume(pid)
+            emitSpawnGatingEvent(
+                device: device,
+                identifier: details.identifier,
+                pid: pid,
+                outcome: .released,
+                sessionID: nil
+            )
+        }
+    }
+
+    private func emitSpawnGatingEvent(
+        device: Device,
+        identifier: String?,
+        pid: UInt,
+        outcome: RuntimeEvent.SpawnGatingOutcome,
+        sessionID: UUID?
+    ) {
+        let displayIdentifier = identifier ?? "(unnamed)"
+        let message: String = {
+            switch outcome {
+            case .captured:
+                return "Captured \(displayIdentifier) (pid \(pid))"
+            case .released:
+                return "Released \(displayIdentifier) (pid \(pid))"
+            }
+        }()
+        let event = RuntimeEvent(
+            sessionID: sessionID,
+            source: .spawnGating(
+                deviceID: device.id,
+                deviceName: device.name,
+                identifier: identifier,
+                pid: pid,
+                outcome: outcome
+            ),
+            payload: .raw(message: message, data: nil)
+        )
+        _events.yield(event)
+        if outcome == .captured,
+           let sessionID,
+           let collabID = collabSessionID(forSessionID: sessionID) {
+            collaboration.sendEvent(sessionID: collabID, event: event)
+        }
+    }
+
+    private func matchedArmedSession(forDeviceID deviceID: String, identifier: String) -> ProcessSession? {
+        let candidates = sessions
+            .filter { $0.deviceID == deviceID }
+            .filter { node(forSessionID: $0.id) == nil }
+            .compactMap { session -> (ProcessSession, Date)? in
+                guard case .armed(_, let armedAt) = session.armingState else { return nil }
+                return (session, armedAt)
+            }
+            .sorted { $0.1 < $1.1 }
+        return candidates.first { matches(identifier: identifier, against: $0.0.armingState) }?.0
+    }
+
+    private func matches(identifier: String, against state: ProcessSession.ArmingState) -> Bool {
+        guard case .armed(let pattern, _) = state else { return false }
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(identifier.startIndex..., in: identifier)
+        return regex.firstMatch(in: identifier, range: range) != nil
+    }
+
+    private func attachToGatedSpawn(device: Device, pid: UInt, session: ProcessSession) async {
+        do {
+            let processes = try await device.enumerateProcesses(pids: [pid], scope: .full)
+            guard let process = processes.first else {
+                try? await device.resume(pid)
+                return
+            }
+            await performAttach(device: device, process: process, session: session)
+        } catch {
+            try? await device.resume(pid)
+            updateSession(id: session.id) {
+                $0.lastError = error.localizedDescription
+                $0.phase = .idle
+            }
+            return
+        }
+
+        guard self.session(id: session.id)?.phase == .attached else {
+            try? await device.resume(pid)
+            return
+        }
+
+        if shouldAutoResumeOnCapture(session) {
+            try? await device.resume(pid)
+        } else {
+            updateSession(id: session.id) { $0.phase = .awaitingInitialResume }
+        }
+    }
+
+    private func shouldAutoResumeOnCapture(_ session: ProcessSession) -> Bool {
+        if case .spawn(let config) = session.kind { return config.autoResume }
+        return true
     }
 }
 

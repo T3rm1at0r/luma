@@ -633,6 +633,8 @@ public final class ProjectStore: Sendable {
             t.column("process_name", .text).notNull()
             t.column("icon_png_data", .blob)
             t.column("phase", .integer).notNull()
+            t.column("arming_state", .blob)
+            t.column("last_arm_pattern", .text)
             t.column("detach_reason", .integer).notNull()
             t.column("last_error", .text)
             t.column("created_at", .datetime).notNull()

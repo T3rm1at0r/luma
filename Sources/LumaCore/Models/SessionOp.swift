@@ -8,6 +8,7 @@ import Foundation
 public enum SessionOp: Sendable {
     case add(Add)
     case updatePhase(UpdatePhase)
+    case updateArming(UpdateArming)
     case updateModules(UpdateModules)
     case updateThreads(UpdateThreads)
     case claimHost(ClaimHost)
@@ -27,6 +28,7 @@ public enum SessionOp: Sendable {
         switch self {
         case .add(let a): return a.opID
         case .updatePhase(let u): return u.opID
+        case .updateArming(let u): return u.opID
         case .updateModules(let u): return u.opID
         case .updateThreads(let u): return u.opID
         case .claimHost(let c): return c.opID
@@ -48,6 +50,7 @@ public enum SessionOp: Sendable {
         switch self {
         case .add(let a): return a.sessionID
         case .updatePhase(let u): return u.sessionID
+        case .updateArming(let u): return u.sessionID
         case .updateModules(let u): return u.sessionID
         case .updateThreads(let u): return u.sessionID
         case .claimHost(let c): return c.sessionID
@@ -69,6 +72,7 @@ public enum SessionOp: Sendable {
         switch self {
         case .add: return "add"
         case .updatePhase: return "update-phase"
+        case .updateArming: return "update-arming"
         case .updateModules: return "update-modules"
         case .updateThreads: return "update-threads"
         case .claimHost: return "claim-host"
@@ -136,6 +140,22 @@ public enum SessionOp: Sendable {
             self.phase = phase
             self.reason = reason
             self.lastSeenAt = lastSeenAt
+        }
+    }
+
+    public struct UpdateArming: Sendable {
+        public let opID: UUID
+        public let sessionID: UUID
+        public let armingState: ProcessSession.ArmingState
+
+        public init(
+            opID: UUID = UUID(),
+            sessionID: UUID,
+            armingState: ProcessSession.ArmingState
+        ) {
+            self.opID = opID
+            self.sessionID = sessionID
+            self.armingState = armingState
         }
     }
 
@@ -354,6 +374,8 @@ public enum SessionOp: Sendable {
             obj["phase"] = u.phase.rawValue
             obj["last_seen_at"] = u.lastSeenAt
             if let reason = u.reason { obj["reason"] = reason }
+        case .updateArming(let u):
+            obj["arming_state"] = encodeArmingState(u.armingState)
         case .updateModules(let u):
             obj["added"] = u.delta.added.map { $0.toJSON() }
             obj["removed"] = u.delta.removed.map { $0.toJSON() }
@@ -460,6 +482,16 @@ public enum SessionOp: Sendable {
                 phase: phase,
                 reason: obj["reason"] as? String,
                 lastSeenAt: lastSeenAt
+            ))
+
+        case "update-arming":
+            guard let stateObj = obj["arming_state"] as? [String: Any],
+                let armingState = decodeArmingState(stateObj)
+            else { return nil }
+            return .updateArming(UpdateArming(
+                opID: opID,
+                sessionID: sessionID,
+                armingState: armingState
             ))
 
         case "update-modules":
@@ -624,5 +656,40 @@ public enum SessionOp: Sendable {
         default:
             return nil
         }
+    }
+}
+
+private nonisolated(unsafe) let armingTimestampFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+}()
+
+func encodeArmingState(_ state: ProcessSession.ArmingState) -> [String: Any] {
+    switch state {
+    case .unarmed:
+        return ["state": "unarmed"]
+    case .armed(let pattern, let armedAt):
+        return [
+            "state": "armed",
+            "match_pattern": pattern,
+            "armed_at": armingTimestampFormatter.string(from: armedAt),
+        ]
+    }
+}
+
+func decodeArmingState(_ obj: [String: Any]) -> ProcessSession.ArmingState? {
+    guard let state = obj["state"] as? String else { return nil }
+    switch state {
+    case "unarmed":
+        return .unarmed
+    case "armed":
+        guard let pattern = obj["match_pattern"] as? String,
+            let armedAtStr = obj["armed_at"] as? String,
+            let armedAt = armingTimestampFormatter.date(from: armedAtStr)
+        else { return nil }
+        return .armed(matchPattern: pattern, armedAt: armedAt)
+    default:
+        return nil
     }
 }

@@ -14,6 +14,12 @@ public struct RuntimeEvent: Identifiable, Sendable {
         case console
         case repl
         case instrument(id: UUID, name: String)
+        case spawnGating(deviceID: String, deviceName: String, identifier: String?, pid: UInt, outcome: SpawnGatingOutcome)
+    }
+
+    public enum SpawnGatingOutcome: String, Sendable {
+        case captured
+        case released
     }
 
     public enum Payload: @unchecked Sendable {
@@ -95,6 +101,16 @@ public struct RuntimeEvent: Identifiable, Sendable {
             return ["kind": "repl"]
         case .instrument(let id, let name):
             return ["kind": "instrument", "id": id.uuidString, "name": name]
+        case .spawnGating(let deviceID, let deviceName, let identifier, let pid, let outcome):
+            var dict: [String: Any] = [
+                "kind": "spawn-gating",
+                "device_id": deviceID,
+                "device_name": deviceName,
+                "pid": pid,
+                "outcome": outcome.rawValue,
+            ]
+            if let identifier { dict["identifier"] = identifier }
+            return dict
         }
     }
 
@@ -116,6 +132,21 @@ public struct RuntimeEvent: Identifiable, Sendable {
                 let name = obj["name"] as? String
             else { return nil }
             return .instrument(id: id, name: name)
+        case "spawn-gating":
+            guard let deviceID = obj["device_id"] as? String,
+                let deviceName = obj["device_name"] as? String,
+                let pid = obj["pid"] as? UInt,
+                let outcomeRaw = obj["outcome"] as? String,
+                let outcome = SpawnGatingOutcome(rawValue: outcomeRaw)
+            else { return nil }
+            let identifier = obj["identifier"] as? String
+            return .spawnGating(
+                deviceID: deviceID,
+                deviceName: deviceName,
+                identifier: identifier,
+                pid: pid,
+                outcome: outcome
+            )
         default:
             return nil
         }

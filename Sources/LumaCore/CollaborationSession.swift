@@ -74,6 +74,7 @@ public final class CollaborationSession {
         public let pid: UInt
         public let processName: String
         public var phase: Phase
+        public var armingState: ProcessSession.ArmingState
         public var driver: UserInfo
         public let createdAt: String
         public var lastSeenAt: String
@@ -92,6 +93,7 @@ public final class CollaborationSession {
             pid: UInt,
             processName: String,
             phase: Phase,
+            armingState: ProcessSession.ArmingState = .unarmed,
             driver: UserInfo,
             createdAt: String,
             lastSeenAt: String,
@@ -109,6 +111,7 @@ public final class CollaborationSession {
             self.pid = pid
             self.processName = processName
             self.phase = phase
+            self.armingState = armingState
             self.driver = driver
             self.createdAt = createdAt
             self.lastSeenAt = lastSeenAt
@@ -168,6 +171,14 @@ public final class CollaborationSession {
             let traceObjs = (obj["traces"] as? [[String: Any]]) ?? []
             let traces = traceObjs.compactMap(ITrace.fromWireJSON)
 
+            let armingState: ProcessSession.ArmingState
+            if let stateObj = obj["arming_state"] as? [String: Any],
+                let parsed = decodeArmingState(stateObj) {
+                armingState = parsed
+            } else {
+                armingState = .unarmed
+            }
+
             return Session(
                 id: id,
                 host: host,
@@ -176,6 +187,7 @@ public final class CollaborationSession {
                 pid: pid,
                 processName: processName,
                 phase: phase,
+                armingState: armingState,
                 driver: driver,
                 createdAt: createdAt,
                 lastSeenAt: lastSeenAt,
@@ -260,6 +272,7 @@ public final class CollaborationSession {
     public var onSessionsSnapshot: (([Session]) -> Void)?
     public var onSessionAdded: ((Session) -> Void)?
     public var onSessionPhaseChanged: ((UUID, Session.Phase, String?) -> Void)?
+    public var onSessionArmingChanged: ((UUID, ProcessSession.ArmingState) -> Void)?
     public var onSessionModulesUpdated: ((UUID, ModuleDelta) -> Void)?
     public var onSessionThreadsUpdated: ((UUID, ThreadDelta) -> Void)?
     public var onSessionHostChanged: ((UUID, UserInfo, String, String, UInt, String) -> Void)?
@@ -712,6 +725,16 @@ public final class CollaborationSession {
         )))
     }
 
+    public func enqueueUpdateSessionArming(
+        sessionID: UUID,
+        armingState: ProcessSession.ArmingState
+    ) {
+        enqueueSessionOp(.updateArming(.init(
+            sessionID: sessionID,
+            armingState: armingState
+        )))
+    }
+
     public func enqueueUpdateSessionModules(sessionID: UUID, delta: ModuleDelta) {
         guard !delta.isEmpty else { return }
         enqueueSessionOp(.updateModules(.init(
@@ -972,6 +995,9 @@ public final class CollaborationSession {
 
         case .updatePhase(let u):
             onSessionPhaseChanged?(u.sessionID, u.phase, u.reason)
+
+        case .updateArming(let u):
+            onSessionArmingChanged?(u.sessionID, u.armingState)
 
         case .updateModules(let u):
             onSessionModulesUpdated?(u.sessionID, u.delta)
