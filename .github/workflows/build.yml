@@ -765,6 +765,7 @@ jobs:
             harfbuzz-devel \
             gdk-pixbuf2-devel \
             graphene-devel \
+            libepoxy-devel \
             libsoup3-devel \
             gobject-introspection-devel \
             atk-devel \
@@ -918,6 +919,7 @@ jobs:
             libharfbuzz-dev \
             libgdk-pixbuf-2.0-dev \
             libgraphene-1.0-dev \
+            libepoxy-dev \
             libsoup-3.0-dev \
             gobject-introspection \
             libgirepository1.0-dev \
@@ -1034,7 +1036,7 @@ jobs:
               /usr/local/lib/swift/linux \
               /usr/lib/x86_64-linux-gnu/libxml2.so.16
           mkdir -p $PKG/DEBIAN
-          printf 'Package: luma\nVersion: %s\nSection: devel\nPriority: optional\nArchitecture: amd64\nDepends: libadwaita-1-0, libwebkitgtk-6.0-4, libzip5, libnice10\nMaintainer: Ole Andre Vadla Ravnas <oleavr@frida.re>\nHomepage: https://luma.frida.re/\nDescription: the official Frida GUI\n Luma is a native app for interactive dynamic instrumentation,\n built on Frida. Persistent sessions, a live REPL, pluggable\n instruments, and real-time collaboration in a workspace that\n remembers where you left off.\n' "$NATIVE_VERSION" > $PKG/DEBIAN/control
+          printf 'Package: luma\nVersion: %s\nSection: devel\nPriority: optional\nArchitecture: amd64\nDepends: libadwaita-1-0, libwebkitgtk-6.0-4, libepoxy0, libzip5, libnice10\nMaintainer: Ole Andre Vadla Ravnas <oleavr@frida.re>\nHomepage: https://luma.frida.re/\nDescription: the official Frida GUI\n Luma is a native app for interactive dynamic instrumentation,\n built on Frida. Persistent sessions, a live REPL, pluggable\n instruments, and real-time collaboration in a workspace that\n remembers where you left off.\n' "$NATIVE_VERSION" > $PKG/DEBIAN/control
           install -m0755 LumaGtk/build-aux/linux/deb-postinst $PKG/DEBIAN/postinst
           install -m0755 LumaGtk/build-aux/linux/deb-postrm   $PKG/DEBIAN/postrm
           dpkg-deb --build $PKG
@@ -1232,7 +1234,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-${{ matrix.vcpkg_triplet }}-v9
+          key: vcpkg-${{ matrix.vcpkg_triplet }}-v10
 
       - name: Install dependencies via vcpkg
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
@@ -1241,14 +1243,14 @@ jobs:
           --overlay-triplets=${{ github.workspace }}/.github/vcpkg-triplets
           --overlay-ports=${{ github.workspace }}/.github/vcpkg-ports
           --triplet ${{ matrix.vcpkg_triplet }}
-          glib glib-networking json-glib libsoup gtk[introspection] atk[introspection] libadwaita[introspection] libxml2 graphite2 sqlite3[snapshot] webview2
+          glib glib-networking json-glib libsoup gtk[introspection] atk[introspection] libadwaita[introspection] libepoxy libxml2 graphite2 sqlite3[snapshot] webview2
 
       - name: Save vcpkg cache
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-${{ matrix.vcpkg_triplet }}-v9
+          key: vcpkg-${{ matrix.vcpkg_triplet }}-v10
 
       - name: Set up vcpkg environment
         shell: bash
