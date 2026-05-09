@@ -282,7 +282,7 @@ struct PhoneSessionsListView: View {
             record.processName = proc.name
             record.lastKnownPID = proc.pid
             if record.iconPNGData == nil, let icon = proc.icons.last {
-                record.iconPNGData = pngData(for: icon)
+                record.iconPNGData = icon.pngData
             }
             try? workspace.store.save(record)
             await workspace.engine.attach(device: device, process: proc, session: record)

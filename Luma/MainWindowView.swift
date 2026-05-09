@@ -1,6 +1,5 @@
 import Frida
 import SwiftUI
-import UniformTypeIdentifiers
 import LumaCore
 
 struct MainWindowView: View {
@@ -269,7 +268,7 @@ struct MainWindowView: View {
             if sessionRecord.iconPNGData == nil,
                 let icon = proc.icons.last
             {
-                sessionRecord.iconPNGData = pngData(for: icon)
+                sessionRecord.iconPNGData = icon.pngData
             }
 
             try? workspace.store.save(sessionRecord)
@@ -476,32 +475,6 @@ struct WorkspaceToolbar: ToolbarContent {
             .help("Show or hide the collaboration panel")
             .keyboardShortcut("c", modifiers: [.command, .option])
         }
-    }
-}
-
-func pngData(for icon: Icon) -> Data? {
-    switch icon {
-    case .png(let bytes):
-        return Data(bytes)
-
-    case .rgba:
-        let image = icon.cgImage  // from Icon+CGImage
-        let data = NSMutableData()
-
-        guard
-            let dest = CGImageDestinationCreateWithData(
-                data as CFMutableData,
-                UTType.png.identifier as CFString,
-                1,
-                nil
-            )
-        else {
-            return nil
-        }
-
-        CGImageDestinationAddImage(dest, image, nil)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        return data as Data
     }
 }
 
