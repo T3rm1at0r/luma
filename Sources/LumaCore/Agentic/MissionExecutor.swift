@@ -117,26 +117,24 @@ public final class MissionExecutor {
                 return
             }
 
-            let outcome: TurnOutcome
-            do {
-                outcome = try await streamOneTurn(provider: provider, request: request, apiKey: apiKey, missionID: mission.id)
-            } catch is CancellationError {
-                mission.status = .cancelled
-                persistMission(mission)
-                return
-            } catch let LLMProviderError.cancelled {
-                mission.status = .cancelled
-                persistMission(mission)
-                return
-            } catch {
-                failMission(&mission, reason: error.localizedDescription)
-                return
+            let outcome = await streamOneTurn(provider: provider, request: request, apiKey: apiKey, missionID: mission.id)
+
+            if !outcome.blocks.isEmpty {
+                do {
+                    try persistAssistantTurn(mission: &mission, outcome: outcome)
+                } catch {
+                    failMission(&mission, reason: "Could not persist turn: \(error.localizedDescription)")
+                    return
+                }
             }
 
-            do {
-                try persistAssistantTurn(mission: &mission, outcome: outcome)
-            } catch {
-                failMission(&mission, reason: "Could not persist turn: \(error.localizedDescription)")
+            if let error = outcome.error {
+                if isCancellation(error) {
+                    mission.status = .cancelled
+                    persistMission(mission)
+                    return
+                }
+                failMission(&mission, reason: error.localizedDescription)
                 return
             }
 
@@ -257,6 +255,7 @@ public final class MissionExecutor {
         var usage: LLMUsage
         var stopReason: LLMStopReason
         var modelID: String
+        var error: Error?
     }
 
     private func streamOneTurn(
@@ -264,26 +263,56 @@ public final class MissionExecutor {
         request: LLMTurnRequest,
         apiKey: String?,
         missionID: UUID
-    ) async throws -> TurnOutcome {
+    ) async -> TurnOutcome {
         var blocks: [LLMContentBlock] = []
+        var streamedText = ""
         var usage = LLMUsage.zero
         var stopReason = LLMStopReason.endTurn
+        var capturedError: Error?
 
         let stream = provider.streamTurn(request, apiKey: apiKey, baseURL: nil)
-        for try await event in stream {
-            liveDeltaSink?(missionID, event)
-            switch event {
-            case .usage(let u):
-                usage = u
-            case .messageStop(let reason):
-                stopReason = reason
-            case .finalMessage(_, let finalBlocks):
-                blocks = finalBlocks
-            default:
-                break
+        do {
+            for try await event in stream {
+                liveDeltaSink?(missionID, event)
+                switch event {
+                case .textDelta(let text):
+                    streamedText.append(text)
+                case .usage(let u):
+                    usage = u
+                case .messageStop(let reason):
+                    stopReason = reason
+                case .finalMessage(_, let finalBlocks):
+                    blocks = finalBlocks
+                default:
+                    break
+                }
+            }
+        } catch {
+            capturedError = error
+            if isCancellation(error) {
+                stopReason = .cancelled
+            } else {
+                stopReason = .error
             }
         }
-        return TurnOutcome(blocks: blocks, usage: usage, stopReason: stopReason, modelID: request.modelID)
+
+        if blocks.isEmpty, !streamedText.isEmpty {
+            blocks = [LLMContentBlock(content: .text(streamedText))]
+        }
+
+        return TurnOutcome(
+            blocks: blocks,
+            usage: usage,
+            stopReason: stopReason,
+            modelID: request.modelID,
+            error: capturedError
+        )
+    }
+
+    private func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if case LLMProviderError.cancelled = error { return true }
+        return false
     }
 
     private func persistAssistantTurn(mission: inout Mission, outcome: TurnOutcome) throws {
