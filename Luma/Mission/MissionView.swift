@@ -20,7 +20,7 @@ struct MissionView: View {
 
                 PlatformHSplit {
                     MissionTranscriptView(turns: turns, actions: actions, liveText: liveText)
-                        .frame(minWidth: 320)
+                        .frame(idealWidth: 480)
 
                     VStack(alignment: .leading, spacing: 0) {
                         ActionQueueView(workspace: workspace, missionID: mission.id, actions: pendingActions)
@@ -28,7 +28,7 @@ struct MissionView: View {
                         Divider()
                         FindingsListView(workspace: workspace, missionID: mission.id, findings: findings)
                     }
-                    .frame(minWidth: 240)
+                    .frame(idealWidth: 280)
                 }
 
                 Divider()
