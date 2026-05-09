@@ -50,7 +50,7 @@ struct ActionQueueView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .alert("Reject action?", isPresented: Binding(
             get: { rejectingAction != nil },
             set: { if !$0 { rejectingAction = nil } }

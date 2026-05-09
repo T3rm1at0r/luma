@@ -45,16 +45,18 @@ struct NewMissionSheet: View {
                         }
                     }
 
-                    if checkingAPIKey {
-                        HStack { ProgressView().scaleEffect(0.7); Text("Checking saved API key…").foregroundStyle(.secondary) }
-                    } else if !hasStoredAPIKey {
-                        SecureField("API key for \(selectedProviderID)", text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
-                        Text("Stored under the app's data directory (\(LumaCredentialServiceName)). Never written to the project document.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Label("API key on file", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                    if currentProviderRequiresKey {
+                        if checkingAPIKey {
+                            HStack { ProgressView().scaleEffect(0.7); Text("Checking saved API key…").foregroundStyle(.secondary) }
+                        } else if !hasStoredAPIKey {
+                            SecureField("API key for \(selectedProviderID)", text: $apiKey)
+                                .textFieldStyle(.roundedBorder)
+                            Text("Stored under the app's data directory. Never written to the project document.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Label("API key on file", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                        }
                     }
                 }
 
@@ -89,9 +91,18 @@ struct NewMissionSheet: View {
     }
 
     private var canStart: Bool {
-        !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !isStarting
-            && (hasStoredAPIKey || !apiKey.isEmpty)
+        guard !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            !isStarting
+        else { return false }
+        if currentProviderRequiresKey {
+            return hasStoredAPIKey || !apiKey.isEmpty
+        }
+        return true
+    }
+
+    private var currentProviderRequiresKey: Bool {
+        workspace.engine.llmRegistry.provider(id: selectedProviderID)?
+            .descriptor.capabilities.requiresAPIKey ?? false
     }
 
     private func modelsForCurrentProvider() -> [LLMModelInfo] {
@@ -99,6 +110,11 @@ struct NewMissionSheet: View {
     }
 
     private func refreshAPIKeyStatus() async {
+        guard currentProviderRequiresKey else {
+            hasStoredAPIKey = false
+            checkingAPIKey = false
+            return
+        }
         checkingAPIKey = true
         defer { checkingAPIKey = false }
         do {
@@ -132,4 +148,3 @@ struct NewMissionSheet: View {
     }
 }
 
-private let LumaCredentialServiceName = "luma.llm.<provider>"
