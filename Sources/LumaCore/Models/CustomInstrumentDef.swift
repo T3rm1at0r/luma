@@ -219,7 +219,8 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         // host loads via the standard instrument lifecycle.
         //
         // create():    install your hooks; return updateConfig + dispose,
-        //              plus onAction if you declared list widgets.
+        //              plus onAction if your list or table widgets
+        //              declare actions.
         // dispose():   undo every side effect (detach listeners, revert
         //              replacements). Save will call this and then re-create
         //              with the new source.
@@ -230,18 +231,30 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         //
         // Widgets declared in the sidebar render in the instance pane and
         // are accessed via `ctx.widget(id)`:
-        //   - graph: push({ series, x, y }), clear()
-        //   - list:  upsertItem({ id, title, subtitle?, accessory? }),
-        //            removeItem(id), clear()
-        // Per-item action buttons on a list widget invoke onAction({
+        //   - graph:     push({ series, x, y }), clear()
+        //   - list:      upsertItem({ id, title, subtitle?, accessory? }),
+        //                removeItem(id), clear()
+        //   - table:     upsertRow({ id, cells }), removeRow(id), clear()
+        //   - counter:   setCounter({ value, unit?, delta? }), clear()
+        //   - histogram: setHistogram(buckets),
+        //                incrementBucket(label, by?), clear()
+        //   - hex:       setHex({ bytes, baseAddress? }), clear()
+        // Action buttons on a list or table widget invoke onAction({
         // widget, action, item }) on the handle. The `widget` and `action`
-        // fields are narrowed to the ids you declared.
+        // fields are narrowed to the ids you declared. The `restored`
+        // argument carries the last snapshot for each widget whose
+        // Persistence is set to Session — widgets left at None do not
+        // appear on `restored`.
         //
-        // The example below assumes one feature `logStack` (Boolean), one
-        // graph widget `opens` with series `count`, and one list widget
-        // `paths` with action `bookmark`. Until you add them, the lines
-        // referencing them are type errors — add them via right-click →
-        // Features… / Widgets…, or delete the corresponding lines.
+        // The example below assumes:
+        //   - one feature `logStack` (Boolean)
+        //   - one graph widget `opens` with series `count` and
+        //     Persistence = Session (required for `restored.opens`
+        //     to type-check)
+        //   - one list widget `paths` with action `bookmark`
+        // Until you add them, the lines referencing them are type
+        // errors — add them via right-click → Features… / Widgets…,
+        // or delete the corresponding lines.
 
         export const instrument: CustomInstrument = {
             create(ctx, config, restored) {
@@ -254,13 +267,13 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
                 if (open !== null) {
                     listeners.push(Interceptor.attach(open, {
                         onEnter(args) {
-                            const path = args[0].readUtf8String() ?? "";
+                            const path = args[0].readUtf8String()!;
                             ctx.emit({ syscall: "open", path });
                             ctx.widget("opens").push({ series: "count", x: Date.now(), y: ++count });
                             ctx.widget("paths").upsertItem({ id: path, title: path });
-                            // if (current.features.logStack) {
-                            //     ctx.emit({ stack: this.context.sp.readByteArray(64) });
-                            // }
+                            if (current.features.logStack) {
+                                ctx.emit({ stack: this.context.sp.readByteArray(64) });
+                            }
                         }
                     }));
                 }
