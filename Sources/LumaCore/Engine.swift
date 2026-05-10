@@ -19,6 +19,7 @@ public final class Engine {
     public let deviceManager = DeviceManager()
     public let store: ProjectStore
     public let traces: TraceStore
+    public let eventStore: EventStore?
     public let compilerWorkspace: CompilerWorkspace
 
     public private(set) var processNodes: [ProcessNode] = []
@@ -100,12 +101,14 @@ public final class Engine {
     public init(
         store: ProjectStore,
         traces: TraceStore,
+        eventStore: EventStore? = nil,
         dataDirectory: URL,
         tokenStore: TokenStore? = nil,
         gitHubAuth: GitHubAuth? = nil
     ) {
         self.store = store
         self.traces = traces
+        self.eventStore = eventStore
         self.dataDirectory = dataDirectory
         self.compilerWorkspace = CompilerWorkspace(store: store)
         let hookPacksDir = dataDirectory.appendingPathComponent("HookPacks", isDirectory: true)
@@ -186,6 +189,12 @@ public final class Engine {
             guard let self else { return }
             for await event in self._events.makeStream() {
                 self.eventLog.append(event)
+            }
+        }
+
+        if let eventStore {
+            eventLog.onEventsToPersist = { batch in
+                Task { await eventStore.append(batch) }
             }
         }
 
@@ -877,6 +886,12 @@ public final class Engine {
     }
 
     public func start() async {
+        if let eventStore {
+            let restored = await eventStore.loadAll()
+            if !restored.isEmpty {
+                eventLog.restore(restored)
+            }
+        }
         if let loaded = try? store.fetchSessions() {
             for var session in loaded where session.phase != .idle {
                 session.phase = .idle
@@ -914,6 +929,13 @@ public final class Engine {
         watchDevicesForGating()
         if let labID = CollaborationJoinQueue.shared.consumeNext() {
             startCollaboration(joiningLab: labID)
+        }
+    }
+
+    public func clearEventLog() {
+        eventLog.clear()
+        if let eventStore {
+            Task { await eventStore.clear() }
         }
     }
 

@@ -123,12 +123,13 @@ final class Workspace: ObservableObject {
         private let localNotifier = LocalNotifier()
     #endif
 
-    init(store: ProjectStore, traces: TraceStore, gitHubAuth: GitHubAuth? = nil) {
+    init(store: ProjectStore, traces: TraceStore, eventStore: EventStore? = nil, gitHubAuth: GitHubAuth? = nil) {
         self.store = store
         self.traces = traces
         self.engine = Engine(
             store: store,
             traces: traces,
+            eventStore: eventStore,
             dataDirectory: LumaAppPaths.shared.dataDirectory,
             gitHubAuth: gitHubAuth
         )

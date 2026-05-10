@@ -141,9 +141,11 @@ final class LumaApplication {
 
             let store = try ProjectStore(path: document.sqlitePath)
             let traces = try TraceStore(directory: document.tracesDirectory)
+            let eventStore = try? EventStore(directory: document.eventsDirectory)
             let engine = Engine(
                 store: store,
                 traces: traces,
+                eventStore: eventStore,
                 dataDirectory: LumaAppPaths.shared.dataDirectory,
                 gitHubAuth: ensuredWelcomeModel().gitHubAuth
             )

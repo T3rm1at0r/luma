@@ -245,7 +245,7 @@ struct EventStreamView: View {
     private var overflowMenu: some View {
         Menu {
             Button(role: .destructive) {
-                workspace.engine.eventLog.clear()
+                workspace.engine.clearEventLog()
                 resetAllEventState()
                 isPaused = false
                 isAtBottom = true

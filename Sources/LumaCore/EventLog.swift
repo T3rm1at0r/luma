@@ -12,7 +12,9 @@ public final class EventLog {
 
     @ObservationIgnored public var onEventsAppended: ((@MainActor (ArraySlice<RuntimeEvent>) -> Void))?
     @ObservationIgnored public var onEventsCleared: ((@MainActor () -> Void))?
+    @ObservationIgnored public var onEventsToPersist: ((@MainActor ([RuntimeEvent]) -> Void))?
     @ObservationIgnored private var allEvents: [RuntimeEvent] = []
+    @ObservationIgnored private var pendingPersist: [RuntimeEvent] = []
     @ObservationIgnored private var isFlushScheduled = false
     @ObservationIgnored private var lastFlushedCount = 0
 
@@ -24,6 +26,7 @@ public final class EventLog {
     public func append(_ event: RuntimeEvent) {
         totalReceived += 1
         allEvents.append(event)
+        pendingPersist.append(event)
 
         if allEvents.count > maxInMemory {
             allEvents.removeFirst(allEvents.count - maxInMemory)
@@ -32,9 +35,19 @@ public final class EventLog {
         scheduleFlush()
     }
 
+    public func restore(_ events: [RuntimeEvent]) {
+        allEvents = Array(events.suffix(maxInMemory))
+        totalReceived = events.count
+        let visible = Array(allEvents.suffix(maxVisible))
+        self.events = visible
+        lastFlushedCount = visible.count
+        flushVersion &+= 1
+    }
+
     public func clear() {
         allEvents.removeAll()
         events.removeAll()
+        pendingPersist.removeAll()
         totalReceived = 0
         flushVersion = 0
         lastFlushedCount = 0
@@ -62,6 +75,11 @@ public final class EventLog {
         flushVersion &+= 1
         if newCount > prevCount {
             onEventsAppended?(visible[prevCount...])
+        }
+        if !pendingPersist.isEmpty, let onEventsToPersist {
+            let batch = pendingPersist
+            pendingPersist.removeAll(keepingCapacity: true)
+            onEventsToPersist(batch)
         }
     }
 }

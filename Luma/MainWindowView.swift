@@ -17,13 +17,15 @@ struct MainWindowView: View {
         let fm = FileManager.default
         let dbURL = projectURL.appendingPathComponent("db.sqlite")
         let tracesURL = projectURL.appendingPathComponent("traces", isDirectory: true)
+        let eventsURL = projectURL.appendingPathComponent("events", isDirectory: true)
         try? fm.createDirectory(at: projectURL, withIntermediateDirectories: true)
         try? fm.createDirectory(at: tracesURL, withIntermediateDirectories: true)
 
         let store = try! ProjectStore(path: dbURL.path)
         let traces = try! TraceStore(directory: tracesURL)
+        let eventStore = try? EventStore(directory: eventsURL)
         self._workspace = StateObject(
-            wrappedValue: Workspace(store: store, traces: traces, gitHubAuth: sharedGitHubAuth())
+            wrappedValue: Workspace(store: store, traces: traces, eventStore: eventStore, gitHubAuth: sharedGitHubAuth())
         )
     }
 

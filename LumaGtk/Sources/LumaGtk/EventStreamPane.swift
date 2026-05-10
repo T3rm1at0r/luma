@@ -409,7 +409,7 @@ final class EventStreamPane {
     }
 
     private func clearEvents() {
-        engine?.eventLog.clear()
+        engine?.clearEventLog()
         displayedEvents.removeAll()
         filteredEvents.removeAll()
         pendingNewEvents = 0
