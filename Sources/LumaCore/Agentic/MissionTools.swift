@@ -36,6 +36,9 @@ public enum MissionTools {
         registerReadTracerHandlerTemplate(in: catalog)
         registerReadCustomInstrumentTemplate(in: catalog)
         registerLookupFridaAPI(in: catalog)
+        registerListPackages(in: catalog, engine: engine)
+        registerInstallPackage(in: catalog, engine: engine)
+        registerRemovePackage(in: catalog, engine: engine)
         registerPinAsInsight(in: catalog, engine: engine)
         registerRequestUserInput(in: catalog)
     }
@@ -457,9 +460,9 @@ public enum MissionTools {
     private static func registerResolveSymbol(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "resolve_symbol",
-            description: "Resolve a symbol query to one or more addresses. Scope can be 'exports', 'imports', 'symbols' (broader). Query may include glob patterns like '*Keychain*'.",
+            description: "Resolve a symbol query to one or more addresses. Queries support globbing (e.g. '*Keychain*'). 'function' searches module exports; 'objc-method' / 'swift-func' / 'java-method' / 'debug-symbol' search those runtimes (Java requires the frida-java-bridge package — install via install_package). 'absolute-instruction' just packages a hex address as an instruction anchor; 'relative-function' takes 'MODULE!OFFSET'.",
             inputSchemaJSON: """
-                {"type":"object","properties":{"session_id":{"type":"string"},"scope":{"type":"string","enum":["exports","imports","symbols"]},"query":{"type":"string"}},"required":["session_id","scope","query"],"additionalProperties":false}
+                {"type":"object","properties":{"session_id":{"type":"string"},"scope":{"type":"string","enum":["function","module","imports","relative-function","absolute-instruction","objc-method","swift-func","java-method","debug-symbol"]},"query":{"type":"string"}},"required":["session_id","scope","query"],"additionalProperties":false}
                 """,
             isObserve: true,
             requiresSession: true
@@ -605,9 +608,9 @@ public enum MissionTools {
     private static func registerInstallTracerHook(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "install_tracer_hook",
-            description: "Install a tracer hook. The 'target' is either a hex address or a symbol query — if a symbol query, it's resolved against exports first. Pass 'code' to start with custom JS in one shot; omit to install the default stub. The hook is enabled on install. If a hook already exists at the same anchor, the existing hook is returned unchanged — use update_tracer_hook to modify it.",
+            description: "Install a tracer hook. 'target' is either a hex address or a query for the chosen 'scope' (function / objc-method / swift-func / java-method / debug-symbol). 'kind' controls when the hook fires: 'function' on entry/exit, 'instruction' on a single instruction. Pass 'code' to start with custom JS in one shot; omit to install the default stub. The hook is enabled on install. If a hook already exists at the same anchor, the existing hook is returned unchanged — use update_tracer_hook to modify it. For Java, install_package frida-java-bridge first.",
             inputSchemaJSON: """
-                {"type":"object","properties":{"session_id":{"type":"string"},"target":{"type":"string","description":"Hex address (0x...) or symbol query"},"kind":{"type":"string","enum":["function","instruction"],"default":"function"},"code":{"type":"string","description":"Custom JS handler. Omit to use the default stub for this hook kind."}},"required":["session_id","target"],"additionalProperties":false}
+                {"type":"object","properties":{"session_id":{"type":"string"},"target":{"type":"string","description":"Hex address (0x...) or symbol query for the chosen scope"},"scope":{"type":"string","enum":["function","objc-method","swift-func","java-method","debug-symbol"],"default":"function","description":"Resolver to use when target isn't a hex address. Ignored when target is hex."},"kind":{"type":"string","enum":["function","instruction"],"default":"function"},"code":{"type":"string","description":"Custom JS handler. Omit to use the default stub for this hook kind."}},"required":["session_id","target"],"additionalProperties":false}
                 """,
             isObserve: false,
             requiresSession: true
@@ -622,8 +625,10 @@ public enum MissionTools {
             let kindString = (invocation.args["kind"] as? String) ?? "function"
             let kind: TracerHookKind = kindString == "instruction" ? .instruction : .function
             let code = (invocation.args["code"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let scope = (invocation.args["scope"] as? String) ?? "function"
 
             let address: UInt64
+            var preferredAnchor: AddressAnchor?
             if let parsed = parseHexAddress(target) {
                 address = parsed
             } else {
@@ -631,20 +636,21 @@ public enum MissionTools {
                     return errorResult("no attached session for id \(sessionID)")
                 }
                 do {
-                    let resolved = try await node.resolveTargets(scope: "exports", query: target)
+                    let resolved = try await node.resolveTargets(scope: scope, query: target)
                     guard let first = resolved.first,
                         let addrStr = first["address"] as? String,
                         let parsed = parseHexAddress(addrStr)
                     else {
-                        return errorResult("could not resolve target '\(target)'")
+                        return errorResult("could not resolve target '\(target)' under scope '\(scope)'")
                     }
                     address = parsed
+                    preferredAnchor = decodeAnchorJSON(first["anchor"] as? [String: Any])
                 } catch {
                     return errorResult("resolve failed: \(error.localizedDescription)")
                 }
             }
 
-            guard let result = await engine.addTracerHook(sessionID: sessionID, address: address, kind: kind, code: code) else {
+            guard let result = await engine.addTracerHook(sessionID: sessionID, address: address, kind: kind, code: code, preferredAnchor: preferredAnchor) else {
                 return errorResult("failed to install hook at \(String(format: "0x%llx", address))")
             }
             let payload: [String: Any] = [
@@ -657,6 +663,35 @@ public enum MissionTools {
                 jsonObject: payload,
                 summary: "Installed tracer hook at \(String(format: "0x%llx", address)) (\(target))"
             )
+        }
+    }
+
+    private static func decodeAnchorJSON(_ obj: [String: Any]?) -> AddressAnchor? {
+        guard let obj, let type = obj["type"] as? String else { return nil }
+        switch type {
+        case "absolute":
+            guard let addrStr = obj["address"] as? String, let addr = parseHexAddress(addrStr) else { return nil }
+            return .absolute(addr)
+        case "moduleOffset":
+            guard let name = obj["name"] as? String, let offset = obj["offset"] as? Int else { return nil }
+            return .moduleOffset(name: name, offset: UInt64(offset))
+        case "moduleExport":
+            guard let name = obj["name"] as? String, let export = obj["export"] as? String else { return nil }
+            return .moduleExport(name: name, export: export)
+        case "objcMethod":
+            guard let selector = obj["selector"] as? String else { return nil }
+            return .objcMethod(selector: selector)
+        case "swiftFunc":
+            guard let module = obj["module"] as? String, let function = obj["function"] as? String else { return nil }
+            return .swiftFunc(module: module, function: function)
+        case "javaMethod":
+            guard let className = obj["className"] as? String, let methodName = obj["methodName"] as? String else { return nil }
+            return .javaMethod(className: className, methodName: methodName)
+        case "debugSymbol":
+            guard let name = obj["name"] as? String else { return nil }
+            return .debugSymbol(name: name)
+        default:
+            return nil
         }
     }
 
@@ -1094,6 +1129,89 @@ public enum MissionTools {
             docLines = []
         }
         return blocks
+    }
+
+    private static func registerListPackages(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "list_packages",
+            description: "List npm packages installed in the project's compiler workspace. These are available to all sessions, custom instruments, and tracer hooks. Common ones: frida-java-bridge (Android Java tracing), frida-objc-bridge.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{},"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] _ in
+            guard let engine else { return errorResult("engine unavailable") }
+            let array: [[String: Any]] = engine.installedPackages.map { pkg in
+                var entry: [String: Any] = [
+                    "name": pkg.name,
+                    "version": pkg.version,
+                ]
+                if let alias = pkg.globalAlias, !alias.isEmpty {
+                    entry["global_alias"] = alias
+                }
+                return entry
+            }
+            return makeResult(jsonObject: array, summary: "\(array.count) installed package\(array.count == 1 ? "" : "s")")
+        }
+    }
+
+    private static func registerInstallPackage(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "install_package",
+            description: "Install an npm package into the project's compiler workspace. Use this to enable runtime bridges (e.g. frida-java-bridge for Java tracing). Requires user approval.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"name":{"type":"string"},"version":{"type":"string","description":"npm semver range (e.g. ^7.0.0). Omit for latest."},"global_alias":{"type":"string","description":"Optional global identifier the package should expose at runtime (e.g. 'Java' for frida-java-bridge)."}},"required":["name"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let name = invocation.args["name"] as? String, !name.isEmpty else {
+                return errorResult("missing name")
+            }
+            let version = invocation.args["version"] as? String
+            let globalAlias = invocation.args["global_alias"] as? String
+            do {
+                let pkg = try await engine.installPackage(name: name, versionSpec: version, globalAlias: globalAlias)
+                let payload: [String: Any] = [
+                    "name": pkg.name,
+                    "version": pkg.version,
+                ]
+                return makeResult(jsonObject: payload, summary: "Installed \(pkg.name)@\(pkg.version)")
+            } catch {
+                return errorResult("install failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func registerRemovePackage(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "remove_package",
+            description: "Remove a previously installed npm package from the project's compiler workspace. Requires user approval.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let name = invocation.args["name"] as? String, !name.isEmpty else {
+                return errorResult("missing name")
+            }
+            guard let pkg = engine.installedPackages.first(where: { $0.name == name }) else {
+                return errorResult("no installed package named '\(name)'")
+            }
+            do {
+                try await engine.removePackage(pkg)
+                return makeResult(jsonObject: ["name": name, "removed": true], summary: "Removed \(name)")
+            } catch {
+                return errorResult("remove failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     private static func describeIcon(_ icon: InstrumentIcon) -> String {
