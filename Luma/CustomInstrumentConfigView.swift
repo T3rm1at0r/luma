@@ -20,7 +20,10 @@ struct CustomInstrumentConfigView: View {
                     if let def, !def.features.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach(def.features) { feature in
-                                featureRow(feature: feature)
+                                InstrumentFeatureRow(
+                                    feature: feature,
+                                    state: stateBinding(for: feature)
+                                )
                             }
                         }
                     } else {
@@ -53,89 +56,15 @@ struct CustomInstrumentConfigView: View {
         }
     }
 
-    @ViewBuilder
-    private func featureRow(feature: CustomInstrumentDef.Feature) -> some View {
-        if feature.optional {
-            optionalFeatureRow(feature: feature)
-        } else {
-            requiredFeatureRow(feature: feature)
-        }
-    }
-
-    @ViewBuilder
-    private func optionalFeatureRow(feature: CustomInstrumentDef.Feature) -> some View {
-        let enabled = enabledBinding(for: feature)
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle(feature.name, isOn: enabled)
-                .platformCheckboxToggleStyle()
-            if case .boolean = feature.schema {
-                EmptyView()
-            } else {
-                FeatureValueEditor(
-                    schema: feature.schema,
-                    value: valueBinding(for: feature)
-                )
-                .disabled(!enabled.wrappedValue)
-                .opacity(enabled.wrappedValue ? 1 : 0.4)
-                .padding(.leading, 20)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func requiredFeatureRow(feature: CustomInstrumentDef.Feature) -> some View {
-        if case .boolean = feature.schema {
-            Toggle(feature.name, isOn: requiredBoolBinding(for: feature))
-                .platformCheckboxToggleStyle()
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(feature.name).font(.subheadline)
-                FeatureValueEditor(
-                    schema: feature.schema,
-                    value: valueBinding(for: feature)
-                )
-                .padding(.leading, 20)
-            }
-        }
-    }
-
-    private func requiredBoolBinding(for feature: CustomInstrumentDef.Feature) -> Binding<Bool> {
+    private func stateBinding(for feature: CustomInstrumentDef.Feature) -> Binding<FeatureState> {
         Binding(
             get: {
-                if case .boolean(let b) = config.features[feature.id]?.value { return b }
-                if case .boolean(let b) = feature.schema.defaultValue { return b }
-                return false
+                config.features[feature.id]
+                    ?? FeatureState(enabled: feature.enabledByDefault, value: feature.schema.defaultValue)
             },
             set: { newValue in
                 var updated = config
-                let existingEnabled = updated.features[feature.id]?.enabled ?? feature.enabledByDefault
-                updated.features[feature.id] = FeatureState(enabled: existingEnabled, value: .boolean(newValue))
-                config = updated
-            }
-        )
-    }
-
-    private func enabledBinding(for feature: CustomInstrumentDef.Feature) -> Binding<Bool> {
-        Binding(
-            get: { config.features[feature.id]?.enabled ?? feature.enabledByDefault },
-            set: { newValue in
-                var updated = config
-                let existingValue = updated.features[feature.id]?.value ?? feature.schema.defaultValue
-                updated.features[feature.id] = FeatureState(enabled: newValue, value: existingValue)
-                config = updated
-            }
-        )
-    }
-
-    private func valueBinding(for feature: CustomInstrumentDef.Feature) -> Binding<FeatureValue> {
-        Binding(
-            get: {
-                config.features[feature.id]?.value ?? feature.schema.defaultValue
-            },
-            set: { newValue in
-                var updated = config
-                let existingEnabled = updated.features[feature.id]?.enabled ?? feature.enabledByDefault
-                updated.features[feature.id] = FeatureState(enabled: existingEnabled, value: newValue)
+                updated.features[feature.id] = newValue
                 config = updated
             }
         )

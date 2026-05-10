@@ -227,7 +227,7 @@ final class InstrumentConfigEditor {
         let packHeader = Box(orientation: .horizontal, spacing: 12)
         packHeader.hexpand = true
 
-        if let iconFile = pack.manifest.icon?.file {
+        if case .file(let iconFile) = pack.manifest.icon {
             let iconPath = pack.folderURL.appendingPathComponent(iconFile).path
             let image = Image(file: iconPath)
             image.set(pixelSize: 32)
@@ -244,7 +244,7 @@ final class InstrumentConfigEditor {
         nameLabel.add(cssClass: "title-3")
         titleColumn.append(child: nameLabel)
 
-        let idLabel = Label(str: pack.manifest.id)
+        let idLabel = Label(str: pack.id)
         idLabel.halign = .start
         idLabel.add(cssClass: "caption")
         idLabel.add(cssClass: "dim-label")
@@ -259,7 +259,7 @@ final class InstrumentConfigEditor {
         outer.append(child: header)
 
         if pack.manifest.features.isEmpty {
-            outer.append(child: dimLabel("This hook-pack does not define any configurable features."))
+            outer.append(child: dimLabel("This hook-pack does not declare any features."))
             return
         }
 
@@ -269,41 +269,79 @@ final class InstrumentConfigEditor {
         }
     }
 
-    private func hookPackFeatureRow(feature: HookPackManifest.Feature, config: HookPackConfig) -> Box {
-        let row = Box(orientation: .horizontal, spacing: 8)
+    private func hookPackFeatureRow(feature: CustomInstrumentDef.Feature, config: HookPackConfig) -> Box {
+        let row = Box(orientation: .vertical, spacing: 4)
         row.hexpand = true
 
-        let nameLabel = Label(str: feature.name)
-        nameLabel.halign = .start
-        nameLabel.setSizeRequest(width: 200, height: -1)
-        row.append(child: nameLabel)
+        let initialEnabled = config.features[feature.id]?.enabled ?? feature.enabledByDefault
+        let initialValue = config.features[feature.id]?.value ?? feature.schema.defaultValue
+        let fid = feature.id
 
-        let initialValue: FeatureValue = .boolean(config.features[feature.id] != nil)
-        let featureID = feature.id
-        let editor = FeatureValueEditor(
-            schema: .boolean,
-            value: initialValue
-        ) { [weak self] newValue in
-            self?.mutateHookPack { cfg in
-                if case .boolean(true) = newValue {
-                    if cfg.features[featureID] == nil {
-                        cfg.features[featureID] = FeatureConfig()
+        if feature.optional {
+            let header = Box(orientation: .horizontal, spacing: 8)
+            header.hexpand = true
+            let toggle = Switch()
+            toggle.active = initialEnabled
+            toggle.valign = .center
+            header.append(child: toggle)
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            nameLabel.hexpand = true
+            header.append(child: nameLabel)
+            row.append(child: header)
+
+            toggle.onStateSet { [weak self] _, state in
+                MainActor.assumeIsolated {
+                    self?.mutateHookPack { cfg in
+                        let existingValue = cfg.features[fid]?.value ?? feature.schema.defaultValue
+                        cfg.features[fid] = FeatureState(enabled: state, value: existingValue)
                     }
-                } else {
-                    cfg.features.removeValue(forKey: featureID)
+                    return false
                 }
+            }
+
+            if case .boolean = feature.schema {
+                return row
+            }
+        } else if case .boolean = feature.schema {
+            let header = Box(orientation: .horizontal, spacing: 8)
+            header.hexpand = true
+            let editor = FeatureValueEditor(schema: feature.schema, value: initialValue) { [weak self] newValue in
+                self?.mutateHookPack { cfg in
+                    let existingEnabled = cfg.features[fid]?.enabled ?? feature.enabledByDefault
+                    cfg.features[fid] = FeatureState(enabled: existingEnabled, value: newValue)
+                }
+            }
+            hookPackFeatureEditors.append(editor)
+            header.append(child: editor.widget)
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            nameLabel.hexpand = true
+            header.append(child: nameLabel)
+            row.append(child: header)
+            return row
+        } else {
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            row.append(child: nameLabel)
+        }
+
+        let editor = FeatureValueEditor(schema: feature.schema, value: initialValue) { [weak self] newValue in
+            self?.mutateHookPack { cfg in
+                let existingEnabled = cfg.features[fid]?.enabled ?? feature.enabledByDefault
+                cfg.features[fid] = FeatureState(enabled: existingEnabled, value: newValue)
             }
         }
         hookPackFeatureEditors.append(editor)
+        editor.widget.marginStart = feature.optional ? 28 : 0
         row.append(child: editor.widget)
         return row
     }
 
     private func mutateHookPack(_ body: (inout HookPackConfig) -> Void) {
-        guard var config = try? JSONDecoder().decode(HookPackConfig.self, from: instrument.configJSON) else { return }
+        guard var config = try? HookPackConfig.decode(from: instrument.configJSON) else { return }
         body(&config)
-        guard let data = try? JSONEncoder().encode(config) else { return }
-        apply(configJSON: data)
+        apply(configJSON: config.encode())
     }
 
     // MARK: - CodeShare

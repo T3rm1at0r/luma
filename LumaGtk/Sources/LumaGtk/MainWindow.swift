@@ -1144,11 +1144,42 @@ final class MainWindow {
             [
                 .init("Rename & Icon\u{2026}") { [weak self] in self?.presentCustomInstrumentRenameDialog(def: def) },
                 .init("Features\u{2026}") { [weak self] in self?.presentCustomInstrumentFeaturesDialog(def: def) },
+                .init("Export as Hookpack\u{2026}") { [weak self] in self?.presentExportHookPackDialog(def: def) },
             ],
             [.init("Delete Custom Instrument", destructive: true) { [weak self] in
                 self?.confirmDeleteCustomInstrument(def: def)
             }],
         ], at: anchor, x: x, y: y)
+    }
+
+    private func presentExportHookPackDialog(def: LumaCore.CustomInstrumentDef) {
+        guard let parentPtr = window.window_ptr.map(UnsafeMutableRawPointer.init) else { return }
+        let context = HookPackExportContext(window: self, def: def)
+        let opaque = Unmanaged.passRetained(context).toOpaque()
+        let initialName = HookPackExportContext.suggestedFilename(for: def.name)
+        "Export as Hookpack".withCString { title in
+            initialName.withCString { initial in
+                luma_file_dialog_save(parentPtr, title, initial, hookPackExportPathThunk, opaque)
+            }
+        }
+    }
+
+    fileprivate func handleHookPackExport(def: LumaCore.CustomInstrumentDef, path: String) {
+        guard let engine else { return }
+        let folderURL = URL(fileURLWithPath: path)
+        do {
+            try engine.exportCustomInstrumentAsHookPack(def, to: folderURL)
+        } catch {
+            presentExportError(message: error.localizedDescription)
+        }
+    }
+
+    private func presentExportError(message: String) {
+        let dialog = Adw.AlertDialog(heading: "Export failed", body: message)
+        dialog.addResponse(id: "ok", label: "OK")
+        dialog.setDefault(response: "ok")
+        dialog.setClose(response: "ok")
+        dialog.present(parent: window)
     }
 
     private func confirmDeleteCustomInstrument(def: LumaCore.CustomInstrumentDef) {
@@ -2532,5 +2563,37 @@ final class MainWindow {
     private func makeSharedCustomInstrumentEditor() -> MonacoEditor {
         let packages = (try? engine?.store.fetchPackagesState().packages) ?? []
         return MonacoEditor(profile: EditorProfile.fridaCustomInstrument(packages: packages))
+    }
+}
+
+@MainActor
+fileprivate final class HookPackExportContext {
+    let window: MainWindow
+    let def: LumaCore.CustomInstrumentDef
+
+    init(window: MainWindow, def: LumaCore.CustomInstrumentDef) {
+        self.window = window
+        self.def = def
+    }
+
+    static func suggestedFilename(for name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet.alphanumerics.union(.init(charactersIn: "-_"))
+        let slug = trimmed.lowercased().unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let collapsed = String(slug).split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+        return collapsed.isEmpty ? "hookpack" : collapsed
+    }
+}
+
+private let hookPackExportPathThunk: @convention(c) (
+    UnsafePointer<CChar>?,
+    UnsafeMutableRawPointer?
+) -> Void = { pathPtr, userData in
+    guard let userData else { return }
+    let context = Unmanaged<HookPackExportContext>.fromOpaque(userData).takeRetainedValue()
+    guard let pathPtr else { return }
+    let path = String(cString: pathPtr)
+    Task { @MainActor in
+        context.window.handleHookPackExport(def: context.def, path: path)
     }
 }

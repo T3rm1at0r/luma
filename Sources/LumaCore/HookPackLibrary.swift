@@ -18,48 +18,31 @@ public final class HookPackLibrary {
     }
 
     public func pack(withId id: String) -> HookPack? {
-        packs.first { $0.manifest.id == id }
+        packs.first { $0.id == id }
     }
 
     public func descriptors() -> [InstrumentDescriptor] {
         packs.map { pack in
-            let icon = hookPackIcon(pack: pack)
-
-            let packID = pack.manifest.id
-            let defaultEnabled = Dictionary(
-                uniqueKeysWithValues: pack.manifest.features
-                    .filter(\.defaultEnabled)
-                    .map { ($0.id, FeatureConfig()) }
+            let packID = pack.id
+            let icon = pack.resolvedIcon
+            let displayName = pack.manifest.name
+            let initialFeatures = Dictionary(
+                uniqueKeysWithValues: pack.manifest.features.map {
+                    ($0.id, FeatureState(enabled: $0.enabledByDefault, value: $0.schema.defaultValue))
+                }
             )
 
             return InstrumentDescriptor(
                 id: "hook-pack:\(packID)",
                 kind: .hookPack,
                 sourceIdentifier: packID,
-                displayName: pack.manifest.name,
+                displayName: displayName,
                 icon: icon,
                 makeInitialConfigJSON: {
-                    try! JSONEncoder().encode(
-                        HookPackConfig(packId: packID, features: defaultEnabled)
-                    )
+                    HookPackConfig(packId: packID, features: initialFeatures).encode()
                 }
             )
         }
-    }
-
-    private func hookPackIcon(pack: HookPack) -> InstrumentIcon {
-        let fallback = InstrumentIcon.symbolic("puzzle")
-        guard let iconMeta = pack.manifest.icon else { return fallback }
-        if let file = iconMeta.file {
-            let fileURL = pack.folderURL.appendingPathComponent(file)
-            if let data = try? Data(contentsOf: fileURL) {
-                return .pixels(data)
-            }
-        }
-        if let symbol = iconMeta.symbolic {
-            return .symbolic(symbol)
-        }
-        return fallback
     }
 
     private func discover() -> [HookPack] {
@@ -86,7 +69,8 @@ public final class HookPackLibrary {
 
             do {
                 let manifest = try JSONDecoder().decode(HookPackManifest.self, from: data)
-                result.append(HookPack(manifest: manifest, folderURL: url))
+                let id = url.lastPathComponent
+                result.append(HookPack(id: id, manifest: manifest, folderURL: url))
             } catch {
                 print("Failed to decode hook-pack manifest at \(manifestURL): \(error)")
             }

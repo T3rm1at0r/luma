@@ -60,6 +60,10 @@ void luma_file_dialog_save(void *parent_window,
                             const char *initial_name,
                             LumaPathCallback callback,
                             void *user_data);
+void luma_folder_dialog_select(void *parent_window,
+                                const char *title,
+                                LumaPathCallback callback,
+                                void *user_data);
 
 // GApplication::open signal wrapper.
 typedef void (*LumaOpenFilesCallback)(const char *path, void *user_data);

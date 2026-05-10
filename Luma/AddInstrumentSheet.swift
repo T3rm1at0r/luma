@@ -1,5 +1,6 @@
 import LumaCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AddInstrumentSheet: View {
     let session: LumaCore.ProcessSession
@@ -15,6 +16,8 @@ struct AddInstrumentSheet: View {
     @State private var selectedDescriptorID: InstrumentDescriptor.ID?
     @State private var initialConfigJSON = Data()
     @State private var compactPath: [InstrumentDescriptor.ID] = []
+    @State private var isShowingImportPicker = false
+    @State private var importErrorMessage: String?
 
     #if canImport(UIKit)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -36,10 +39,21 @@ struct AddInstrumentSheet: View {
     }
 
     private static let newCustomDescriptorID: String = "custom:__new__"
+    private static let importHookPackDescriptorID: String = "custom:__import__"
 
     private var selectedDescriptor: InstrumentDescriptor? {
         guard let id = selectedDescriptorID else { return nil }
         return descriptors.first { $0.id == id }
+    }
+
+    private var confirmActionLabel: String {
+        selectedDescriptorID == Self.importHookPackDescriptorID ? "Choose Folder\u{2026}" : "Add"
+    }
+
+    private var isConfirmActionDisabled: Bool {
+        if selectedDescriptorID == Self.newCustomDescriptorID { return false }
+        if selectedDescriptorID == Self.importHookPackDescriptorID { return false }
+        return selectedDescriptor == nil
     }
 
     var body: some View {
@@ -51,6 +65,26 @@ struct AddInstrumentSheet: View {
             }
         }
         .frame(minWidth: isCompactWidth ? 0 : 800, minHeight: isCompactWidth ? 0 : 420)
+        .fileImporter(
+            isPresented: $isShowingImportPicker,
+            allowedContentTypes: [.folder]
+        ) { result in
+            if case .success(let url) = result {
+                importHookPack(at: url)
+            }
+        }
+        .alert("Import failed", isPresented: importErrorBinding, presenting: importErrorMessage) { _ in
+            Button("OK") { importErrorMessage = nil }
+        } message: { message in
+            Text(message)
+        }
+    }
+
+    private var importErrorBinding: Binding<Bool> {
+        Binding(
+            get: { importErrorMessage != nil },
+            set: { if !$0 { importErrorMessage = nil } }
+        )
     }
 
     private var compactBody: some View {
@@ -77,6 +111,12 @@ struct AddInstrumentSheet: View {
                         Label("New Custom Instrument\u{2026}", systemImage: "plus.circle")
                     }
                     .accessibilityIdentifier("addInstrument.descriptor.\(Self.newCustomDescriptorID)")
+                    Button {
+                        isShowingImportPicker = true
+                    } label: {
+                        Label("Import from Hookpack\u{2026}", systemImage: "square.and.arrow.down")
+                    }
+                    .accessibilityIdentifier("addInstrument.descriptor.\(Self.importHookPackDescriptorID)")
                 }
             }
             .navigationTitle("Add Instrument")
@@ -122,6 +162,13 @@ struct AddInstrumentSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("addInstrument.descriptor.\(Self.newCustomDescriptorID)")
             .tag(Self.newCustomDescriptorID)
+            HStack {
+                Image(systemName: "square.and.arrow.down")
+                Text("Import from Hookpack\u{2026}")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("addInstrument.descriptor.\(Self.importHookPackDescriptorID)")
+            .tag(Self.importHookPackDescriptorID)
         }
     }
 
@@ -137,6 +184,8 @@ struct AddInstrumentSheet: View {
             Group {
                 if selectedDescriptorID == Self.newCustomDescriptorID {
                     newCustomDetail
+                } else if selectedDescriptorID == Self.importHookPackDescriptorID {
+                    importHookPackDetail
                 } else if let descriptor = selectedDescriptor {
                     detailContent(descriptor: descriptor)
                 } else {
@@ -149,7 +198,7 @@ struct AddInstrumentSheet: View {
         }
         .onChange(of: selectedDescriptorID) { _, newID in
             guard let id = newID else { return }
-            if id == Self.newCustomDescriptorID {
+            if id == Self.newCustomDescriptorID || id == Self.importHookPackDescriptorID {
                 initialConfigJSON = Data()
                 return
             }
@@ -193,6 +242,48 @@ struct AddInstrumentSheet: View {
     }
 
     @ViewBuilder
+    private var importHookPackDetail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: "square.and.arrow.down")
+                .font(.system(size: 32))
+            Text("Import from Hookpack")
+                .font(.headline)
+            Text("Pick a hookpack folder containing manifest.json and a TypeScript entry file. The hookpack is cloned into the project as a custom instrument with a fresh identity, so subsequent edits stay local.")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding()
+    }
+
+    @MainActor
+    private func importHookPack(at folderURL: URL) {
+        let started = folderURL.startAccessingSecurityScopedResource()
+        defer { if started { folderURL.stopAccessingSecurityScopedResource() } }
+        do {
+            let def = try workspace.engine.importCustomInstrumentFromHookPack(folderURL: folderURL)
+            Task { @MainActor in
+                let configJSON = CustomInstrumentConfig(
+                    defID: def.id,
+                    features: CustomInstrumentLibrary.initialFeatureStates(for: def)
+                ).encode()
+                let added = await workspace.engine.addInstrument(
+                    kind: .custom,
+                    sourceIdentifier: def.id.uuidString,
+                    configJSON: configJSON,
+                    sessionID: session.id
+                )
+                if let added {
+                    onInstrumentAdded?(added)
+                }
+                selection = .customInstrumentDef(def.id)
+                dismiss()
+            }
+        } catch {
+            importErrorMessage = error.localizedDescription
+        }
+    }
+
+    @ViewBuilder
     private func detailContent(descriptor: InstrumentDescriptor) -> some View {
         if let ui = InstrumentUIRegistry.shared.ui(for: descriptor.id) {
             ui.makeConfigEditor(
@@ -229,8 +320,12 @@ struct AddInstrumentSheet: View {
             }
         }
         ToolbarItem(placement: .confirmationAction) {
-            Button("Add") {
+            Button(confirmActionLabel) {
                 commitCoordinator.flushPendingEdits()
+                if selectedDescriptorID == Self.importHookPackDescriptorID {
+                    isShowingImportPicker = true
+                    return
+                }
                 Task { @MainActor in
                     if selectedDescriptorID == Self.newCustomDescriptorID {
                         await createNewCustomAndDismiss()
@@ -250,7 +345,7 @@ struct AddInstrumentSheet: View {
                     dismiss()
                 }
             }
-            .disabled(selectedDescriptor == nil && selectedDescriptorID != Self.newCustomDescriptorID)
+            .disabled(isConfirmActionDisabled)
             .accessibilityIdentifier("addInstrument.add")
         }
         ToolbarItem(placement: .automatic) {

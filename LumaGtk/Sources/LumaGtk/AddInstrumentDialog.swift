@@ -1,5 +1,6 @@
 import Adw
 import CGtk
+import CLuma
 import Foundation
 import Gtk
 import LumaCore
@@ -27,6 +28,8 @@ final class AddInstrumentDialog {
     private var hookPackFeatureEditors: [FeatureValueEditor] = []
     private let sharedTracerMonaco: MonacoEditor
     private let sharedCodeShareMonaco: MonacoEditor
+    private var newCustomIndex: Int = 0
+    private var importHookPackIndex: Int = 0
 
     init(
         parent: Gtk.Window,
@@ -133,7 +136,20 @@ final class AddInstrumentDialog {
         newCustomBox.append(child: newCustomLabel)
         newCustomRow.set(child: newCustomBox)
         listBox.append(child: newCustomRow)
-        let newCustomIndex = descriptors.count
+        newCustomIndex = descriptors.count
+
+        let importHookPackRow = ListBoxRow()
+        let importHookPackBox = Box(orientation: .vertical, spacing: 2)
+        importHookPackBox.marginStart = 12
+        importHookPackBox.marginEnd = 12
+        importHookPackBox.marginTop = 8
+        importHookPackBox.marginBottom = 8
+        let importHookPackLabel = Label(str: "↓ Import from Hookpack\u{2026}")
+        importHookPackLabel.halign = .start
+        importHookPackBox.append(child: importHookPackLabel)
+        importHookPackRow.set(child: importHookPackBox)
+        listBox.append(child: importHookPackRow)
+        importHookPackIndex = descriptors.count + 1
 
         showPlaceholder(message: "Select an instrument to configure.")
 
@@ -142,18 +158,26 @@ final class AddInstrumentDialog {
                 guard let self else { return }
                 if let row {
                     let idx = Int(row.index)
-                    if idx == newCustomIndex {
+                    if idx == self.newCustomIndex {
                         self.selectedIndex = nil
                         self.addButton.sensitive = true
+                        self.addButton.label = "Add"
                         self.showNewCustomDetail()
+                    } else if idx == self.importHookPackIndex {
+                        self.selectedIndex = nil
+                        self.addButton.sensitive = true
+                        self.addButton.label = "Choose Folder\u{2026}"
+                        self.showImportHookPackDetail()
                     } else {
                         self.selectedIndex = idx
                         self.addButton.sensitive = true
+                        self.addButton.label = "Add"
                         self.refreshDetail()
                     }
                 } else {
                     self.selectedIndex = nil
                     self.addButton.sensitive = false
+                    self.addButton.label = "Add"
                     self.tracerEditor = nil
                     self.showPlaceholder(message: "Select an instrument to configure.")
                 }
@@ -279,37 +303,58 @@ final class AddInstrumentDialog {
         pendingConfigJSON = config.encode()
     }
 
-    private func hookPackFeatureRow(feature: HookPackManifest.Feature, configCapture: HookPackConfig) -> Box {
-        let row = Box(orientation: .horizontal, spacing: 8)
+    private func hookPackFeatureRow(feature: CustomInstrumentDef.Feature, configCapture: HookPackConfig) -> Box {
+        let row = Box(orientation: .vertical, spacing: 4)
         row.hexpand = true
 
-        let nameLabel = Label(str: feature.name)
-        nameLabel.halign = .start
-        nameLabel.setSizeRequest(width: 200, height: -1)
-        row.append(child: nameLabel)
+        let initialEnabled = configCapture.features[feature.id]?.enabled ?? feature.enabledByDefault
+        let initialValue = configCapture.features[feature.id]?.value ?? feature.schema.defaultValue
+        let fid = feature.id
 
-        let initialValue: FeatureValue = .boolean(configCapture.features[feature.id] != nil)
-        let featureID = feature.id
-        let editor = FeatureValueEditor(
-            schema: .boolean,
-            value: initialValue
-        ) { [weak self] newValue in
+        if feature.optional {
+            let header = Box(orientation: .horizontal, spacing: 8)
+            header.hexpand = true
+            let toggle = Switch()
+            toggle.active = initialEnabled
+            toggle.valign = .center
+            header.append(child: toggle)
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            nameLabel.hexpand = true
+            header.append(child: nameLabel)
+            row.append(child: header)
+
+            toggle.onStateSet { [weak self] _, state in
+                MainActor.assumeIsolated {
+                    guard let self else { return false }
+                    guard var cfg = try? HookPackConfig.decode(from: self.pendingConfigJSON) else { return false }
+                    let existingValue = cfg.features[fid]?.value ?? feature.schema.defaultValue
+                    cfg.features[fid] = FeatureState(enabled: state, value: existingValue)
+                    self.pendingConfigJSON = cfg.encode()
+                    return false
+                }
+            }
+
+            if case .boolean = feature.schema {
+                return row
+            }
+        } else {
+            let nameLabel = Label(str: feature.name)
+            nameLabel.halign = .start
+            row.append(child: nameLabel)
+        }
+
+        let editor = FeatureValueEditor(schema: feature.schema, value: initialValue) { [weak self] newValue in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                guard var cfg = try? JSONDecoder().decode(HookPackConfig.self, from: self.pendingConfigJSON) else { return }
-                if case .boolean(true) = newValue {
-                    if cfg.features[featureID] == nil {
-                        cfg.features[featureID] = FeatureConfig()
-                    }
-                } else {
-                    cfg.features.removeValue(forKey: featureID)
-                }
-                if let data = try? JSONEncoder().encode(cfg) {
-                    self.pendingConfigJSON = data
-                }
+                guard var cfg = try? HookPackConfig.decode(from: self.pendingConfigJSON) else { return }
+                let existingEnabled = cfg.features[fid]?.enabled ?? feature.enabledByDefault
+                cfg.features[fid] = FeatureState(enabled: existingEnabled, value: newValue)
+                self.pendingConfigJSON = cfg.encode()
             }
         }
         hookPackFeatureEditors.append(editor)
+        editor.widget.marginStart = feature.optional ? 28 : 0
         row.append(child: editor.widget)
         return row
     }
@@ -394,6 +439,30 @@ final class AddInstrumentDialog {
         detailContainer.append(child: box)
     }
 
+    private func showImportHookPackDetail() {
+        clearDetail()
+        let box = Box(orientation: .vertical, spacing: 12)
+        box.halign = .center
+        box.valign = .center
+        box.hexpand = true
+        box.vexpand = true
+        box.marginStart = 24
+        box.marginEnd = 24
+        box.marginTop = 24
+        box.marginBottom = 24
+
+        let title = Label(str: "Import from Hookpack")
+        title.add(cssClass: "title-3")
+        box.append(child: title)
+
+        let hint = Label(str: "Pick a hookpack folder containing manifest.json and a TypeScript entry file. The hookpack is cloned into the project as a custom instrument with a fresh identity, so subsequent edits stay local.")
+        hint.add(cssClass: "dim-label")
+        hint.wrap = true
+        hint.justify = .center
+        box.append(child: hint)
+        detailContainer.append(child: box)
+    }
+
     private func buildTracerEditor(descriptor: LumaCore.InstrumentDescriptor) {
         guard let config = try? TracerConfig.decode(from: pendingConfigJSON) else {
             showPlaceholder(message: "Failed to decode tracer config.")
@@ -422,7 +491,7 @@ final class AddInstrumentDialog {
         detailContainer.append(child: outer)
 
         guard
-            let config = try? JSONDecoder().decode(HookPackConfig.self, from: pendingConfigJSON),
+            let config = try? HookPackConfig.decode(from: pendingConfigJSON),
             let pack = engine.hookPacks.pack(withId: descriptor.sourceIdentifier)
         else {
             outer.append(child: errorLabel("Failed to load hook pack"))
@@ -434,7 +503,7 @@ final class AddInstrumentDialog {
         title.add(cssClass: "title-3")
         outer.append(child: title)
 
-        let idLabel = Label(str: pack.manifest.id)
+        let idLabel = Label(str: pack.id)
         idLabel.halign = .start
         idLabel.add(cssClass: "caption")
         idLabel.add(cssClass: "dim-label")
@@ -447,11 +516,11 @@ final class AddInstrumentDialog {
         outer.append(child: header)
 
         if pack.manifest.features.isEmpty {
-            let dim = Label(str: "This hook-pack does not define any configurable features.")
+            let dim = Label(str: "This hook-pack does not declare any features.")
             dim.add(cssClass: "dim-label")
             dim.halign = .start
             outer.append(child: dim)
-            try? pendingConfigJSON = JSONEncoder().encode(config)
+            pendingConfigJSON = config.encode()
             return
         }
 
@@ -460,9 +529,7 @@ final class AddInstrumentDialog {
             outer.append(child: hookPackFeatureRow(feature: feature, configCapture: config))
         }
 
-        if let data = try? JSONEncoder().encode(config) {
-            pendingConfigJSON = data
-        }
+        pendingConfigJSON = config.encode()
     }
 
     private func buildCodeShareEditor(descriptor: LumaCore.InstrumentDescriptor) {
@@ -613,9 +680,16 @@ final class AddInstrumentDialog {
     }
 
     private func commit() {
-        if selectedIndex == nil && addButton.sensitive {
-            commitNewCustom()
-            return
+        if let row = listBox.selectedRow {
+            let idx = Int(row.index)
+            if idx == newCustomIndex {
+                commitNewCustom()
+                return
+            }
+            if idx == importHookPackIndex {
+                presentHookPackImportPicker()
+                return
+            }
         }
         guard let index = selectedIndex, index < descriptors.count else { return }
         let descriptor = descriptors[index]
@@ -660,11 +734,68 @@ final class AddInstrumentDialog {
         close()
     }
 
+    private func presentHookPackImportPicker() {
+        guard let parentPtr = parentWindow.window_ptr.map(UnsafeMutableRawPointer.init) else { return }
+        let context = Unmanaged.passRetained(self).toOpaque()
+        "Choose hookpack folder".withCString { title in
+            luma_folder_dialog_select(parentPtr, title, addInstrumentImportFolderThunk, context)
+        }
+    }
+
+    fileprivate func handleImportFolder(_ path: String?) {
+        guard let path else { return }
+        let folderURL = URL(fileURLWithPath: path)
+        let engine = self.engine
+        let sessionID = self.sessionID
+        let onAdded = self.onAdded
+        do {
+            let def = try engine.importCustomInstrumentFromHookPack(folderURL: folderURL)
+            Task { @MainActor in
+                let configJSON = CustomInstrumentConfig(
+                    defID: def.id,
+                    features: CustomInstrumentLibrary.initialFeatureStates(for: def)
+                ).encode()
+                let instance = await engine.addInstrument(
+                    kind: .custom,
+                    sourceIdentifier: def.id.uuidString,
+                    configJSON: configJSON,
+                    sessionID: sessionID
+                )
+                if let instance {
+                    onAdded?(instance)
+                }
+            }
+            close()
+        } catch {
+            presentImportError(message: error.localizedDescription)
+        }
+    }
+
+    private func presentImportError(message: String) {
+        let alert = Adw.AlertDialog(heading: "Import failed", body: message)
+        alert.addResponse(id: "ok", label: "OK")
+        alert.setDefault(response: "ok")
+        alert.setClose(response: "ok")
+        alert.present(parent: parentWindow)
+    }
+
     private func openCodeShareBrowser() {
         let parent = parentWindow
         let editor = sharedCodeShareMonaco
         close()
         CodeShareBrowser.present(from: parent, engine: engine, sessionID: sessionID, codeShareEditor: editor)
+    }
+}
+
+private let addInstrumentImportFolderThunk: @convention(c) (
+    UnsafePointer<CChar>?,
+    UnsafeMutableRawPointer?
+) -> Void = { pathPtr, userData in
+    guard let userData else { return }
+    let dialog = Unmanaged<AddInstrumentDialog>.fromOpaque(userData).takeRetainedValue()
+    let path = pathPtr.map { String(cString: $0) }
+    Task { @MainActor in
+        dialog.handleImportFolder(path)
     }
 }
 

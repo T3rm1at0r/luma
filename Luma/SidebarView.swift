@@ -658,6 +658,8 @@ struct SidebarCustomInstrumentDefRow: View {
     @State private var isShowingRename = false
     @State private var isShowingFeatures = false
     @State private var isShowingDeleteConfirm = false
+    @State private var exportBundle: HookPackExportBundle?
+    @State private var exportErrorMessage: String?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -679,6 +681,11 @@ struct SidebarCustomInstrumentDefRow: View {
                 isShowingFeatures = true
             } label: {
                 Label("Features\u{2026}", systemImage: "switch.2")
+            }
+            Button {
+                presentExportPicker()
+            } label: {
+                Label("Export as Hookpack\u{2026}", systemImage: "square.and.arrow.up")
             }
             Button(role: .destructive) {
                 isShowingDeleteConfirm = true
@@ -715,6 +722,84 @@ struct SidebarCustomInstrumentDefRow: View {
         } message: {
             Text("This removes the custom instrument from the project and from any sessions where it is loaded.")
         }
+        .fileExporter(
+            isPresented: exportPickerBinding,
+            document: exportBundle.map(HookPackExportDocument.init),
+            contentType: .folder,
+            defaultFilename: HookPackExportDocument.suggestedFilename(for: def.name)
+        ) { result in
+            if case .failure(let error) = result {
+                exportErrorMessage = error.localizedDescription
+            }
+            exportBundle = nil
+        }
+        .alert("Export failed", isPresented: exportErrorBinding, presenting: exportErrorMessage) { _ in
+            Button("OK") { exportErrorMessage = nil }
+        } message: { message in
+            Text(message)
+        }
+    }
+
+    private var exportPickerBinding: Binding<Bool> {
+        Binding(
+            get: { exportBundle != nil },
+            set: { if !$0 { exportBundle = nil } }
+        )
+    }
+
+    private var exportErrorBinding: Binding<Bool> {
+        Binding(
+            get: { exportErrorMessage != nil },
+            set: { if !$0 { exportErrorMessage = nil } }
+        )
+    }
+
+    private func presentExportPicker() {
+        do {
+            let bundle = try workspace.engine.buildHookPackBundle(for: def)
+            exportBundle = HookPackExportBundle(bundle: bundle)
+        } catch {
+            exportErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+struct HookPackExportBundle: Identifiable {
+    let id = UUID()
+    let bundle: HookPackBundle
+}
+
+struct HookPackExportDocument: FileDocument {
+    static let readableContentTypes: [UTType] = []
+    static let writableContentTypes: [UTType] = [.folder]
+
+    let bundle: HookPackBundle
+
+    init(_ exportBundle: HookPackExportBundle) {
+        self.bundle = exportBundle.bundle
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        throw CocoaError(.fileReadUnsupportedScheme)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        var children: [String: FileWrapper] = [
+            "manifest.json": FileWrapper(regularFileWithContents: bundle.manifestData),
+            bundle.entryFilename: FileWrapper(regularFileWithContents: Data(bundle.entrySource.utf8)),
+        ]
+        if let icon = bundle.icon {
+            children[icon.filename] = FileWrapper(regularFileWithContents: icon.data)
+        }
+        return FileWrapper(directoryWithFileWrappers: children)
+    }
+
+    static func suggestedFilename(for name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet.alphanumerics.union(.init(charactersIn: "-_"))
+        let slug = trimmed.lowercased().unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let collapsed = String(slug).split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+        return collapsed.isEmpty ? "hookpack" : collapsed
     }
 }
 

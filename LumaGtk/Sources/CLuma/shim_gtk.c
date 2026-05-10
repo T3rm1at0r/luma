@@ -150,6 +150,26 @@ on_save_finished(GObject *source, GAsyncResult *result, gpointer user_data)
     g_free(ctx);
 }
 
+static void
+on_select_folder_finished(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+    LumaPathCtx *ctx = (LumaPathCtx *)user_data;
+    GError *error = NULL;
+    GFile *file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, &error);
+    if (file != NULL) {
+        char *path = g_file_get_path(file);
+        ctx->callback(path, ctx->user_data);
+        g_free(path);
+        g_object_unref(file);
+    } else {
+        ctx->callback(NULL, ctx->user_data);
+        if (error != NULL) {
+            g_error_free(error);
+        }
+    }
+    g_free(ctx);
+}
+
 void
 luma_file_dialog_open(void *parent_window,
                       const char *title,
@@ -191,6 +211,26 @@ luma_file_dialog_save(void *parent_window,
     ctx->user_data = user_data;
 
     gtk_file_dialog_save(dialog, GTK_WINDOW(parent_window), NULL, on_save_finished, ctx);
+    g_object_unref(dialog);
+}
+
+void
+luma_folder_dialog_select(void *parent_window,
+                          const char *title,
+                          LumaPathCallback callback,
+                          void *user_data)
+{
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    if (title != NULL) {
+        gtk_file_dialog_set_title(dialog, title);
+    }
+    gtk_file_dialog_set_modal(dialog, TRUE);
+
+    LumaPathCtx *ctx = g_new0(LumaPathCtx, 1);
+    ctx->callback = callback;
+    ctx->user_data = user_data;
+
+    gtk_file_dialog_select_folder(dialog, GTK_WINDOW(parent_window), NULL, on_select_folder_finished, ctx);
     g_object_unref(dialog);
 }
 

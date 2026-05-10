@@ -147,8 +147,8 @@ final class Workspace: ObservableObject {
 
         for pack in engine.hookPacks.packs {
             registry.register(
-                for: "hook-pack:\(pack.manifest.id)",
-                ui: HookPackUI(manifest: pack.manifest)
+                for: "hook-pack:\(pack.id)",
+                ui: HookPackUI(pack: pack)
             )
         }
 

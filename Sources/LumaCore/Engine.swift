@@ -2162,7 +2162,8 @@ public final class Engine {
         case .hookPack:
             let config = (try? HookPackConfig.decode(from: configJSON))
                 ?? HookPackConfig(packId: inst.sourceIdentifier, features: [:])
-            configObject = config.toJSON()
+            guard let pack = hookPacks.pack(withId: inst.sourceIdentifier) else { return }
+            configObject = config.toAgentJSON(features: pack.manifest.features)
 
         case .codeShare:
             configObject = (try? JSONSerialization.jsonObject(with: configJSON, options: []) as? JSONObject) ?? [:]
@@ -2204,14 +2205,10 @@ public final class Engine {
                 )
 
             case .hookPack:
-                guard let pack = hookPacks.pack(withId: sourceIdentifier),
-                    let entrySource = try? String(contentsOf: pack.entryURL, encoding: .utf8)
-                else { return }
-
+                guard let pack = hookPacks.pack(withId: sourceIdentifier) else { return }
                 try await loadHookPackInstrument(
                     instanceID: instanceID,
-                    packID: pack.manifest.id,
-                    entrySource: entrySource,
+                    pack: pack,
                     configJSON: configJSON,
                     on: node
                 )
@@ -2637,23 +2634,30 @@ public final class Engine {
 
     public func loadHookPackInstrument(
         instanceID: UUID,
-        packID: String,
-        entrySource: String,
+        pack: HookPack,
         configJSON: Data,
         on node: ProcessNode
     ) async throws {
         let config = try InstrumentConfigCodec.decode(HookPackConfig.self, from: configJSON)
+        let entrySource = try String(contentsOf: pack.entryURL, encoding: .utf8)
+        let paths = try compilerWorkspacePaths()
+        let sourceSlug = "hookpacks/\(pack.id)"
+        let compiledSource = try await compileTypeScriptInstrumentSource(
+            sourceSlug: sourceSlug,
+            tsSource: entrySource,
+            paths: paths,
+            diagnosticLabel: "hook pack \(pack.id)"
+        )
 
-        let data = Data(entrySource.utf8)
-        let digest = SHA256.hash(data: data)
+        let digest = SHA256.hash(data: Data(compiledSource.utf8))
         let hashHex = digest.map { String(format: "%02x", $0) }.joined()
-        let moduleName = "/hookpacks/\(packID)/\(hashHex).js"
+        let moduleName = "/\(sourceSlug)/\(hashHex).js"
 
         try await node.loadInstrumentOnAgent(
             instanceID: instanceID,
             moduleName: moduleName,
-            source: entrySource,
-            config: config.toJSON()
+            source: compiledSource,
+            config: config.toAgentJSON(features: pack.manifest.features)
         )
     }
 
@@ -2664,15 +2668,17 @@ public final class Engine {
         on node: ProcessNode
     ) async throws {
         let paths = try compilerWorkspacePaths()
-        let compiledSource = try await compileCustomInstrumentSource(
-            defID: def.id,
+        let sourceSlug = "custom/\(def.id.uuidString)"
+        let compiledSource = try await compileTypeScriptInstrumentSource(
+            sourceSlug: sourceSlug,
             tsSource: def.source,
-            paths: paths
+            paths: paths,
+            diagnosticLabel: "custom instrument \(def.id.uuidString)"
         )
 
         let digest = SHA256.hash(data: Data(compiledSource.utf8))
         let hashHex = digest.map { String(format: "%02x", $0) }.joined()
-        let moduleName = "/custom/\(def.id.uuidString)/\(hashHex).js"
+        let moduleName = "/\(sourceSlug)/\(hashHex).js"
 
         try await node.loadInstrumentOnAgent(
             instanceID: instanceID,
@@ -2682,21 +2688,22 @@ public final class Engine {
         )
     }
 
-    private func compileCustomInstrumentSource(
-        defID: UUID,
+    private func compileTypeScriptInstrumentSource(
+        sourceSlug: String,
         tsSource: String,
-        paths: CompilerWorkspacePaths
+        paths: CompilerWorkspacePaths,
+        diagnosticLabel: String
     ) async throws -> String {
         _ = try await compilerWorkspace.ensureReady(paths: paths)
 
         let fm = FileManager.default
-        let dirRelPath = "CustomInstruments"
+        let dirRelPath = "InstrumentSources/\(sourceSlug)"
         let dirURL = paths.root.appendingPathComponent(dirRelPath, isDirectory: true)
         if !fm.fileExists(atPath: dirURL.path) {
             try fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
         }
 
-        let moduleRelPath = "\(dirRelPath)/\(defID.uuidString).ts"
+        let moduleRelPath = "\(dirRelPath)/entry.ts"
         let moduleURL = paths.root.appendingPathComponent(moduleRelPath)
         try tsSource.write(to: moduleURL, atomically: true, encoding: .utf8)
 
@@ -2706,7 +2713,7 @@ public final class Engine {
         options.sourceMaps = .omitted
         options.compression = .terser
 
-        let bundle = try await compilerWorkspace.withCompilerDiagnostics(label: "custom instrument \(defID.uuidString)") { compiler in
+        let bundle = try await compilerWorkspace.withCompilerDiagnostics(label: diagnosticLabel) { compiler in
             try await compiler.build(entrypoint: moduleRelPath, options: options)
         }
 
@@ -2754,6 +2761,90 @@ public final class Engine {
         broadcastCustomInstrumentUpsert(updated)
         onSessionListChanged?(.customInstrumentDefsChanged)
         await reloadCustomInstrumentInstances(def: updated)
+    }
+
+    @discardableResult
+    public func importCustomInstrumentFromHookPack(folderURL: URL) throws -> CustomInstrumentDef {
+        let manifestURL = folderURL.appendingPathComponent("manifest.json")
+        let manifestData = try Data(contentsOf: manifestURL)
+        let manifest = try JSONDecoder().decode(HookPackManifest.self, from: manifestData)
+
+        let entryURL = folderURL.appendingPathComponent(manifest.entry)
+        let source = try String(contentsOf: entryURL, encoding: .utf8)
+
+        let icon: InstrumentIcon
+        switch manifest.icon {
+        case nil:
+            icon = .symbolic(InstrumentIconCatalog.default.id)
+        case .symbolic(let id):
+            icon = .symbolic(id)
+        case .file(let path):
+            let iconURL = folderURL.appendingPathComponent(path)
+            icon = .pixels(try Data(contentsOf: iconURL))
+        }
+
+        let now = Date()
+        var def = CustomInstrumentDef(
+            id: UUID(),
+            name: uniquedCustomInstrumentName(manifest.name),
+            icon: icon,
+            source: source,
+            features: manifest.features,
+            createdAt: now,
+            updatedAt: now
+        )
+        def.normalize()
+        try store.save(def)
+        registerDescriptor(customInstruments.descriptor(for: def))
+        broadcastCustomInstrumentUpsert(def)
+        onSessionListChanged?(.customInstrumentDefsChanged)
+        return def
+    }
+
+    public func buildHookPackBundle(for def: CustomInstrumentDef) throws -> HookPackBundle {
+        let entryName = "instrument.ts"
+
+        let iconAttachment: HookPackBundle.IconAttachment?
+        let manifestIcon: HookPackManifest.Icon?
+        switch def.icon {
+        case .symbolic(let id):
+            manifestIcon = .symbolic(id)
+            iconAttachment = nil
+        case .pixels(let data):
+            let iconName = "icon.png"
+            manifestIcon = .file(iconName)
+            iconAttachment = HookPackBundle.IconAttachment(filename: iconName, data: data)
+        }
+
+        let manifest = HookPackManifest(
+            name: def.name,
+            icon: manifestIcon,
+            entry: entryName,
+            features: def.features
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let manifestData = try encoder.encode(manifest)
+
+        return HookPackBundle(
+            manifestData: manifestData,
+            entryFilename: entryName,
+            entrySource: def.source,
+            icon: iconAttachment
+        )
+    }
+
+    public func exportCustomInstrumentAsHookPack(_ def: CustomInstrumentDef, to folderURL: URL) throws {
+        let bundle = try buildHookPackBundle(for: def)
+        let fm = FileManager.default
+        try fm.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        try bundle.manifestData.write(to: folderURL.appendingPathComponent("manifest.json"))
+        try Data(bundle.entrySource.utf8).write(
+            to: folderURL.appendingPathComponent(bundle.entryFilename)
+        )
+        if let icon = bundle.icon {
+            try icon.data.write(to: folderURL.appendingPathComponent(icon.filename))
+        }
     }
 
     public func attachCustomInstrument(sessionID: UUID, defID: UUID) async -> InstrumentInstance? {

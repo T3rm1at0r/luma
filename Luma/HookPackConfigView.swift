@@ -2,48 +2,52 @@ import SwiftUI
 import LumaCore
 
 struct HookPackConfigView: View {
-    let manifest: HookPackManifest
+    let pack: HookPack
     @Binding var config: HookPackConfig
 
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                InstrumentIconView(icon: pack.resolvedIcon, pointSize: 14)
+                Text(pack.manifest.name).font(.headline)
+                Spacer()
+            }
+
             GroupBox("Features") {
-                if manifest.features.isEmpty {
-                    Text("This hook-pack does not define any configurable features.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(manifest.features) { feature in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(feature.name)
-                                    .frame(width: 200, alignment: .leading)
-                                FeatureValueEditor(
-                                    schema: .boolean,
-                                    value: featureValueBinding(for: feature)
+                Group {
+                    if pack.manifest.features.isEmpty {
+                        Text("This hook-pack does not declare any features.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(pack.manifest.features) { feature in
+                                InstrumentFeatureRow(
+                                    feature: feature,
+                                    state: stateBinding(for: feature)
                                 )
                             }
                         }
                     }
                 }
+                .padding(.leading, 12)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
             Spacer()
         }
     }
 
-    private func featureValueBinding(for feature: HookPackManifest.Feature) -> Binding<FeatureValue> {
+    private func stateBinding(for feature: CustomInstrumentDef.Feature) -> Binding<FeatureState> {
         Binding(
-            get: { .boolean(config.features[feature.id] != nil) },
+            get: {
+                config.features[feature.id]
+                    ?? FeatureState(enabled: feature.enabledByDefault, value: feature.schema.defaultValue)
+            },
             set: { newValue in
-                if case .boolean(let enabled) = newValue {
-                    if enabled {
-                        config.features[feature.id] = FeatureConfig()
-                    } else {
-                        config.features.removeValue(forKey: feature.id)
-                    }
-                }
+                var updated = config
+                updated.features[feature.id] = newValue
+                config = updated
             }
         )
     }

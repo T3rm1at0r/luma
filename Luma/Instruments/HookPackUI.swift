@@ -2,7 +2,7 @@ import SwiftUI
 import LumaCore
 
 struct HookPackUI: InstrumentUI {
-    let manifest: HookPackManifest
+    let pack: HookPack
 
     func makeConfigEditor(
         configJSON: Binding<Data>,
@@ -12,7 +12,7 @@ struct HookPackUI: InstrumentUI {
         let cfgBinding = Binding<HookPackConfig>(
             get: {
                 (try? JSONDecoder().decode(HookPackConfig.self, from: configJSON.wrappedValue))
-                    ?? HookPackConfig(packId: manifest.id, features: [:])
+                    ?? HookPackConfig(packId: pack.id, features: [:])
             },
             set: { newValue in
                 if let data = try? JSONEncoder().encode(newValue) {
@@ -23,7 +23,7 @@ struct HookPackUI: InstrumentUI {
 
         return AnyView(
             HookPackConfigView(
-                manifest: manifest,
+                pack: pack,
                 config: cfgBinding
             )
         )
