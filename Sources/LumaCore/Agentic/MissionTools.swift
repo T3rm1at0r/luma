@@ -15,6 +15,7 @@ public enum MissionTools {
         registerSpawnProcess(in: catalog, engine: engine)
         registerListModules(in: catalog, engine: engine)
         registerSummarizeRecentEvents(in: catalog, engine: engine)
+        registerWaitForEvent(in: catalog, engine: engine)
         registerResolveSymbol(in: catalog, engine: engine)
         registerDisassemble(in: catalog, engine: engine)
         registerDecompile(in: catalog, engine: engine)
@@ -431,9 +432,9 @@ public enum MissionTools {
     private static func registerSummarizeRecentEvents(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "summarize_recent_events",
-            description: "Read the most recent runtime events from the global event log. Optionally filter by session_id or by kind. Useful right after a hook is enabled and the user reproduces a behavior.",
+            description: "Read the most recent runtime events from the global event log. Filter by session_id, kind (substring on the event kind name), or match_pattern (case-insensitive regex on the event summary). Pass since_event_id to only get events newer than a previously-seen id.",
             inputSchemaJSON: """
-                {"type":"object","properties":{"session_id":{"type":"string"},"kind":{"type":"string","description":"Filter by event kind, e.g. tracer, repl"},"limit":{"type":"integer","minimum":1,"maximum":200,"description":"Max events to return (default 50)"}},"additionalProperties":false}
+                {"type":"object","properties":{"session_id":{"type":"string"},"kind":{"type":"string","description":"Filter by event kind, e.g. tracer, repl"},"match_pattern":{"type":"string","description":"Case-insensitive regex matched against the event summary."},"since_event_id":{"type":"string","description":"Only return events that arrived after this id."},"limit":{"type":"integer","minimum":1,"maximum":200,"description":"Max events to return (default 50)"}},"additionalProperties":false}
                 """,
             isObserve: true,
             requiresSession: false
@@ -441,30 +442,117 @@ public enum MissionTools {
         catalog.register(spec: spec) { [weak engine] invocation in
             guard let engine else { return errorResult("engine unavailable") }
             let limit = (invocation.args["limit"] as? Int) ?? 50
-            let kindFilter = invocation.args["kind"] as? String
-            let sessionFilter = parseSessionID(invocation.args)
-
-            var events = engine.eventLog.events
-            if let sessionFilter {
-                events = events.filter { $0.sessionID == sessionFilter }
+            do {
+                let filter = try parseEventFilter(invocation.args)
+                let matched = filteredEvents(engine.eventLog.events, filter: filter)
+                return eventsResult(Array(matched.suffix(limit)), totalConsidered: matched.count)
+            } catch let error as EventFilterError {
+                return errorResult(error.message)
+            } catch {
+                return errorResult("filter failed: \(error.localizedDescription)")
             }
-            if let kindFilter {
-                events = events.filter { describeEventKind($0).contains(kindFilter) }
-            }
-            let tail = Array(events.suffix(limit))
-            let formatter = ISO8601DateFormatter()
-            let array: [[String: Any]] = tail.map { event in
-                var obj: [String: Any] = [
-                    "id": event.id.uuidString,
-                    "kind": describeEventKind(event),
-                    "timestamp": formatter.string(from: event.timestamp),
-                    "summary": describeEventSummary(event),
-                ]
-                if let sid = event.sessionID { obj["session_id"] = sid.uuidString }
-                return obj
-            }
-            return makeResult(jsonObject: array, summary: "Returned \(tail.count) of \(events.count) recent event\(events.count == 1 ? "" : "s")")
         }
+    }
+
+    private static func registerWaitForEvent(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "wait_for_event",
+            description: "Block until at least one matching runtime event arrives, or the timeout elapses. Same filter shape as summarize_recent_events. Pair it with a hook install or a user-driven trigger so the agent doesn't need to poll. Returns matching events newer than since_event_id, or an empty list on timeout.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"kind":{"type":"string"},"match_pattern":{"type":"string"},"since_event_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"description":"Max events to return (default 50)"},"timeout_ms":{"type":"integer","minimum":100,"maximum":60000,"description":"Maximum wait in milliseconds (default 30000, capped at 60000)"}},"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            let limit = (invocation.args["limit"] as? Int) ?? 50
+            let timeoutMs = min((invocation.args["timeout_ms"] as? Int) ?? 30_000, 60_000)
+            let filter: EventFilter
+            do {
+                filter = try parseEventFilter(invocation.args)
+            } catch let error as EventFilterError {
+                return errorResult(error.message)
+            } catch {
+                return errorResult("filter failed: \(error.localizedDescription)")
+            }
+
+            let pollIntervalNs: UInt64 = 100_000_000
+            let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+            while true {
+                try? Task.checkCancellation()
+                let matched = filteredEvents(engine.eventLog.events, filter: filter)
+                if !matched.isEmpty {
+                    return eventsResult(Array(matched.suffix(limit)), totalConsidered: matched.count)
+                }
+                if Date() >= deadline {
+                    return eventsResult([], totalConsidered: 0, summary: "No matching events within \(timeoutMs)ms")
+                }
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
+            }
+        }
+    }
+
+    private struct EventFilter {
+        var sessionID: UUID?
+        var kindSubstring: String?
+        var pattern: Regex<AnyRegexOutput>?
+        var sinceEventID: UUID?
+    }
+
+    private struct EventFilterError: Swift.Error {
+        let message: String
+    }
+
+    private static func parseEventFilter(_ args: [String: Any]) throws -> EventFilter {
+        var filter = EventFilter()
+        filter.sessionID = parseSessionID(args)
+        if let kind = args["kind"] as? String, !kind.isEmpty {
+            filter.kindSubstring = kind
+        }
+        if let raw = (args["match_pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            do {
+                filter.pattern = try Regex(raw).ignoresCase()
+            } catch {
+                throw EventFilterError(message: "invalid match_pattern: \(error.localizedDescription)")
+            }
+        }
+        if let sinceRaw = args["since_event_id"] as? String, !sinceRaw.isEmpty {
+            guard let id = UUID(uuidString: sinceRaw) else {
+                throw EventFilterError(message: "invalid since_event_id")
+            }
+            filter.sinceEventID = id
+        }
+        return filter
+    }
+
+    private static func filteredEvents(_ events: [RuntimeEvent], filter: EventFilter) -> [RuntimeEvent] {
+        var slice = events[...]
+        if let since = filter.sinceEventID, let cut = slice.firstIndex(where: { $0.id == since }) {
+            slice = slice[slice.index(after: cut)...]
+        }
+        return slice.filter { event in
+            if let id = filter.sessionID, event.sessionID != id { return false }
+            if let kind = filter.kindSubstring, !describeEventKind(event).contains(kind) { return false }
+            if let pattern = filter.pattern, !describeEventSummary(event).contains(pattern) { return false }
+            return true
+        }
+    }
+
+    private static func eventsResult(_ events: [RuntimeEvent], totalConsidered: Int, summary: String? = nil) -> ActionResult {
+        let formatter = ISO8601DateFormatter()
+        let array: [[String: Any]] = events.map { event in
+            var obj: [String: Any] = [
+                "id": event.id.uuidString,
+                "kind": describeEventKind(event),
+                "timestamp": formatter.string(from: event.timestamp),
+                "summary": describeEventSummary(event),
+            ]
+            if let sid = event.sessionID { obj["session_id"] = sid.uuidString }
+            return obj
+        }
+        let resolvedSummary = summary ?? "Returned \(events.count) of \(totalConsidered) matching event\(totalConsidered == 1 ? "" : "s")"
+        return makeResult(jsonObject: array, summary: resolvedSummary)
     }
 
     // MARK: - resolve_symbol
