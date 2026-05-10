@@ -33,16 +33,19 @@ public struct HookPackManifest: Codable, Sendable, Equatable {
     public var icon: Icon?
     public var entry: String
     public var features: [CustomInstrumentDef.Feature]
+    public var widgets: [InstrumentWidget]
 
     public init(
         name: String,
         icon: Icon?,
         entry: String,
-        features: [CustomInstrumentDef.Feature]
+        features: [CustomInstrumentDef.Feature],
+        widgets: [InstrumentWidget]
     ) {
         self.name = name
         self.icon = icon
         self.entry = entry
         self.features = features
+        self.widgets = widgets
     }
 }

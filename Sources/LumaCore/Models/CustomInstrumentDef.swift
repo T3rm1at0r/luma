@@ -9,6 +9,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     public var icon: InstrumentIcon
     public var source: String
     public var features: [Feature]
+    public var widgets: [InstrumentWidget]
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -40,6 +41,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         icon: InstrumentIcon = .symbolic(InstrumentIconCatalog.default.id),
         source: String = CustomInstrumentDef.exampleSource,
         features: [Feature] = [],
+        widgets: [InstrumentWidget] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -48,6 +50,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         self.icon = icon
         self.source = source
         self.features = features
+        self.widgets = widgets
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -59,6 +62,8 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         source = row["source"]
         let featuresJSON: String = row["features_json"]
         features = try JSONDecoder().decode([Feature].self, from: Data(featuresJSON.utf8))
+        let widgetsJSON: String = row["widgets_json"]
+        widgets = try JSONDecoder().decode([InstrumentWidget].self, from: Data(widgetsJSON.utf8))
         createdAt = row["created_at"]
         updatedAt = row["updated_at"]
     }
@@ -69,6 +74,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         container["icon"] = icon.encodedJSONString()
         container["source"] = source
         container["features_json"] = featuresJSONString
+        container["widgets_json"] = widgetsJSONString
         container["created_at"] = createdAt
         container["updated_at"] = updatedAt
     }
@@ -80,6 +86,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
             "icon": icon.toJSON(),
             "source": source,
             "features": features.map(featureToJSON),
+            "widgets": widgetsJSONArray,
             "created_at": ISO8601DateFormatter().string(from: createdAt),
             "updated_at": ISO8601DateFormatter().string(from: updatedAt),
         ]
@@ -92,6 +99,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
             let source = obj["source"] as? String
         else { return nil }
         let features = parseFeatures(obj["features"])
+        let widgets = parseWidgets(obj["widgets"])
         let isoFmt = ISO8601DateFormatter()
         let createdAt = (obj["created_at"] as? String).flatMap(isoFmt.date(from:)) ?? Date()
         let updatedAt = (obj["updated_at"] as? String).flatMap(isoFmt.date(from:)) ?? Date()
@@ -101,6 +109,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
             icon: icon,
             source: source,
             features: features,
+            widgets: widgets,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -111,9 +120,27 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         return String(decoding: data, as: UTF8.self)
     }
 
+    private var widgetsJSONString: String {
+        let data = try! JSONEncoder().encode(widgets)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private var widgetsJSONArray: [Any] {
+        let data = try! JSONEncoder().encode(widgets)
+        return try! JSONSerialization.jsonObject(with: data) as! [Any]
+    }
+
     private static func parseFeatures(_ raw: Any?) -> [Feature] {
         guard let arr = raw as? [[String: Any]] else { return [] }
         return arr.compactMap(parseFeature)
+    }
+
+    private static func parseWidgets(_ raw: Any?) -> [InstrumentWidget] {
+        guard let arr = raw as? [Any],
+            let data = try? JSONSerialization.data(withJSONObject: arr),
+            let widgets = try? JSONDecoder().decode([InstrumentWidget].self, from: data)
+        else { return [] }
+        return widgets
     }
 
     private static func parseFeature(_ obj: [String: Any]) -> Feature? {
@@ -191,28 +218,46 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         // the target process and exports an `instrument` object that the
         // host loads via the standard instrument lifecycle.
         //
-        // create():  install your hooks; return updateConfig + dispose.
-        // dispose(): undo every side effect (detach listeners, revert
-        //            replacements). Save will call this and then re-create
-        //            with the new source.
+        // create():    install your hooks; return updateConfig + dispose,
+        //              plus onAction if you declared list widgets.
+        // dispose():   undo every side effect (detach listeners, revert
+        //              replacements). Save will call this and then re-create
+        //              with the new source.
         //
-        // Features you declare in the sidebar show up on `config.features`
+        // Features declared in the sidebar show up on `config.features`
         // typed exactly as you defined them. Accessing a feature you have
-        // not declared is a type error. The boilerplate below uses one
-        // feature called `logStack`; it is commented out until you add it
-        // (right-click the instrument → Features… → Add `logStack`,
-        // schema: Boolean).
+        // not declared is a type error.
+        //
+        // Widgets declared in the sidebar render in the instance pane and
+        // are accessed via `ctx.widget(id)`:
+        //   - graph: push({ series, x, y }), clear()
+        //   - list:  upsertItem({ id, title, subtitle?, accessory? }),
+        //            removeItem(id), clear()
+        // Per-item action buttons on a list widget invoke onAction({
+        // widget, action, item }) on the handle. The `widget` and `action`
+        // fields are narrowed to the ids you declared.
+        //
+        // The example below assumes one feature `logStack` (Boolean), one
+        // graph widget `opens` with series `count`, and one list widget
+        // `paths` with action `bookmark`. Until you add them, the lines
+        // referencing them are type errors — add them via right-click →
+        // Features… / Widgets…, or delete the corresponding lines.
 
         export const instrument: CustomInstrument = {
-            create(ctx, config) {
+            create(ctx, config, restored) {
                 let current = config;
                 const listeners: InvocationListener[] = [];
+                const bookmarks = new Set<string>();
+                let count = restored.opens.points.length;
 
                 const open = Module.findGlobalExportByName("open");
                 if (open !== null) {
                     listeners.push(Interceptor.attach(open, {
                         onEnter(args) {
-                            ctx.emit({ syscall: "open", path: args[0].readUtf8String() });
+                            const path = args[0].readUtf8String() ?? "";
+                            ctx.emit({ syscall: "open", path });
+                            ctx.widget("opens").push({ series: "count", x: Date.now(), y: ++count });
+                            ctx.widget("paths").upsertItem({ id: path, title: path });
                             // if (current.features.logStack) {
                             //     ctx.emit({ stack: this.context.sp.readByteArray(64) });
                             // }
@@ -223,6 +268,12 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
                 return {
                     updateConfig(next) {
                         current = next;
+                    },
+                    onAction(action) {
+                        if (action.widget === "paths" && action.action === "bookmark") {
+                            bookmarks.add(action.item);
+                            ctx.emit({ bookmarked: action.item });
+                        }
                     },
                     dispose() {
                         for (const l of listeners) {

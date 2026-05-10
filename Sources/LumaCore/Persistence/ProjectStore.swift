@@ -805,6 +805,65 @@ public final class ProjectStore: Sendable {
         }
     }
 
+    // MARK: - Widget State
+
+    public func fetchWidgetStates(instanceID: UUID) throws -> [String: WidgetState] {
+        try db.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT widget_id, state_json FROM widget_state WHERE instance_id = ?",
+                arguments: [instanceID.uuidString]
+            )
+            var result: [String: WidgetState] = [:]
+            for row in rows {
+                let widgetID: String = row["widget_id"]
+                let json: String = row["state_json"]
+                result[widgetID] = try JSONDecoder().decode(WidgetState.self, from: Data(json.utf8))
+            }
+            return result
+        }
+    }
+
+    public func saveWidgetState(
+        instanceID: UUID,
+        widgetID: String,
+        sessionID: UUID,
+        state: WidgetState
+    ) throws {
+        let json = String(decoding: try JSONEncoder().encode(state), as: UTF8.self)
+        try db.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO widget_state (instance_id, widget_id, session_id, state_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(instance_id, widget_id) DO UPDATE SET
+                        state_json = excluded.state_json,
+                        session_id = excluded.session_id,
+                        updated_at = excluded.updated_at
+                    """,
+                arguments: [instanceID.uuidString, widgetID, sessionID.uuidString, json, Date()]
+            )
+        }
+    }
+
+    public func deleteWidgetState(instanceID: UUID, widgetID: String) throws {
+        try db.write { db in
+            try db.execute(
+                sql: "DELETE FROM widget_state WHERE instance_id = ? AND widget_id = ?",
+                arguments: [instanceID.uuidString, widgetID]
+            )
+        }
+    }
+
+    public func deleteWidgetStates(instanceID: UUID) throws {
+        try db.write { db in
+            try db.execute(
+                sql: "DELETE FROM widget_state WHERE instance_id = ?",
+                arguments: [instanceID.uuidString]
+            )
+        }
+    }
+
     private func saveCustomInstrumentOutboxOp(_ op: CustomInstrumentOp, in db: Database) throws {
         let payload = op.toJSON()
         let data = try JSONSerialization.data(
@@ -994,8 +1053,18 @@ public final class ProjectStore: Sendable {
             t.column("icon", .text).notNull()
             t.column("source", .text).notNull()
             t.column("features_json", .text).notNull().defaults(to: "[]")
+            t.column("widgets_json", .text).notNull().defaults(to: "[]")
             t.column("created_at", .datetime).notNull()
             t.column("updated_at", .datetime).notNull()
+        }
+
+        try db.create(table: "widget_state", ifNotExists: true) { t in
+            t.column("instance_id", .text).notNull()
+            t.column("widget_id", .text).notNull()
+            t.column("session_id", .text).notNull()
+            t.column("state_json", .text).notNull()
+            t.column("updated_at", .datetime).notNull()
+            t.primaryKey(["instance_id", "widget_id"])
         }
 
         try db.create(table: "custom_instrument_outbox", ifNotExists: true) { t in
