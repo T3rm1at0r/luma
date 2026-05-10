@@ -3063,9 +3063,9 @@ public final class Engine {
     private func reloadCustomInstrumentInstances(def: CustomInstrumentDef) async {
         let key = def.id.uuidString
         for (sessionID, instances) in instrumentsBySession {
-            for inst in instances where inst.kind == .custom && inst.sourceIdentifier == key {
+            for inst in instances where inst.kind == .custom && inst.sourceIdentifier == key && inst.state == .enabled {
                 guard let node = node(forSessionID: sessionID) else { continue }
-                guard node.instruments.first(where: { $0.id == inst.id })?.attachment == .attached else { continue }
+                let wasAttached = node.instruments.first(where: { $0.id == inst.id })?.attachment == .attached
                 let originalCfg = (try? CustomInstrumentConfig.decode(from: inst.configJSON))
                     ?? CustomInstrumentConfig(defID: def.id)
                 let cfg = originalCfg.normalized(against: def)
@@ -3074,10 +3074,12 @@ public final class Engine {
                     originalConfig: originalCfg,
                     normalizedConfig: cfg
                 )
-                do {
-                    try await node.disposeInstrumentOnAgent(instanceID: liveInstance.id)
-                } catch {
-                    print("[Engine] Failed to dispose custom instance \(liveInstance.id): \(error)")
+                if wasAttached {
+                    do {
+                        try await node.disposeInstrumentOnAgent(instanceID: liveInstance.id)
+                    } catch {
+                        print("[Engine] Failed to dispose custom instance \(liveInstance.id): \(error)")
+                    }
                 }
                 do {
                     try await loadCustomInstrument(
