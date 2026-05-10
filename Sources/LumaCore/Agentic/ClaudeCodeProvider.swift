@@ -182,7 +182,7 @@ public final class ClaudeCodeProvider: LLMProvider {
             throw LLMProviderError.requestFailed(status: Int(process.terminationStatus), message: message)
         }
 
-        let finalText = streamedText.isEmpty ? assistantText : streamedText
+        let finalText = !assistantText.isEmpty ? assistantText : streamedText
         if !finalText.isEmpty {
             if streamedText.isEmpty {
                 continuation.yield(.textDelta(finalText))
