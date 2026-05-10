@@ -27,6 +27,12 @@ public enum MissionTools {
         registerReadTracerHook(in: catalog, engine: engine)
         registerUpdateTracerHook(in: catalog, engine: engine)
         registerRemoveTracerHook(in: catalog, engine: engine)
+        registerListCustomInstruments(in: catalog, engine: engine)
+        registerReadCustomInstrument(in: catalog, engine: engine)
+        registerCreateCustomInstrument(in: catalog, engine: engine)
+        registerUpdateCustomInstrument(in: catalog, engine: engine)
+        registerDeleteCustomInstrument(in: catalog, engine: engine)
+        registerAttachCustomInstrument(in: catalog, engine: engine)
         registerPinAsInsight(in: catalog, engine: engine)
         registerRequestUserInput(in: catalog)
     }
@@ -782,6 +788,210 @@ public enum MissionTools {
             let payload: [String: Any] = ["hook_id": hookID.uuidString, "removed": true]
             return makeResult(jsonObject: payload, summary: "Removed hook \(hookID)")
         }
+    }
+
+    // MARK: - custom instruments
+
+    private static func registerListCustomInstruments(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "list_custom_instruments",
+            description: "List custom instrument definitions in this project (id, name, icon, feature_count). Source code is not included — fetch via read_custom_instrument.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{},"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] _ in
+            guard let engine else { return errorResult("engine unavailable") }
+            let array: [[String: Any]] = engine.customInstruments.defs.map { def in
+                [
+                    "id": def.id.uuidString,
+                    "name": def.name,
+                    "icon": describeIcon(def.icon),
+                    "feature_count": def.features.count,
+                ]
+            }
+            return makeResult(jsonObject: array, summary: "\(array.count) custom instrument\(array.count == 1 ? "" : "s")")
+        }
+    }
+
+    private static func registerReadCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "read_custom_instrument",
+            description: "Read a custom instrument's full definition, including TypeScript source and features. Use only when you intend to read or edit the source.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"def_id":{"type":"string"}},"required":["def_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let defID = (invocation.args["def_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid def_id")
+            }
+            guard let def = engine.customInstruments.def(withId: defID) else {
+                return errorResult("no custom instrument with id \(defID)")
+            }
+            return makeResult(jsonObject: customInstrumentJSON(def: def), summary: "Custom instrument \(def.name)")
+        }
+    }
+
+    private static func registerCreateCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "create_custom_instrument",
+            description: "Create a custom instrument definition. The definition lives in the project and can be attached to any number of sessions via attach_custom_instrument. 'source' is the full TypeScript module. Optional 'icon' is one of the catalog ids (e.g. wand-stars, bug, scope, network). Optional 'features' declares boolean toggles surfaced on config.features in the source.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"name":{"type":"string"},"icon":{"type":"string","description":"Catalog id like wand-stars, bug, scope, network — see list_custom_instrument_icons"},"source":{"type":"string"},"features":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"enabled_by_default":{"type":"boolean","default":true}},"required":["id","name"],"additionalProperties":false}}},"required":["name","source"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let name = invocation.args["name"] as? String, !name.isEmpty else {
+                return errorResult("missing name")
+            }
+            guard let source = invocation.args["source"] as? String, !source.isEmpty else {
+                return errorResult("missing source")
+            }
+            let icon = parseIconArg(invocation.args["icon"] as? String)
+            let features = parseFeaturesArg(invocation.args["features"])
+            var def = engine.createCustomInstrument(name: name, icon: icon, source: source)
+            if !features.isEmpty {
+                def.features = features
+                await engine.updateCustomInstrument(def)
+            }
+            return makeResult(jsonObject: ["def_id": def.id.uuidString, "name": def.name], summary: "Created custom instrument \(def.name)")
+        }
+    }
+
+    private static func registerUpdateCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "update_custom_instrument",
+            description: "Update a custom instrument's name, icon, source, or features. Only fields you pass change.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"def_id":{"type":"string"},"name":{"type":"string"},"icon":{"type":"string"},"source":{"type":"string"},"features":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"enabled_by_default":{"type":"boolean","default":true}},"required":["id","name"],"additionalProperties":false}}},"required":["def_id"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let defID = (invocation.args["def_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid def_id")
+            }
+            guard var def = engine.customInstruments.def(withId: defID) else {
+                return errorResult("no custom instrument with id \(defID)")
+            }
+            if let name = invocation.args["name"] as? String, !name.isEmpty {
+                def.name = name
+            }
+            if let iconID = invocation.args["icon"] as? String {
+                def.icon = parseIconArg(iconID)
+            }
+            if let source = invocation.args["source"] as? String, !source.isEmpty {
+                def.source = source
+            }
+            if invocation.args["features"] != nil {
+                def.features = parseFeaturesArg(invocation.args["features"])
+            }
+            await engine.updateCustomInstrument(def)
+            return makeResult(jsonObject: ["def_id": def.id.uuidString, "name": def.name], summary: "Updated custom instrument \(def.name)")
+        }
+    }
+
+    private static func registerDeleteCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "delete_custom_instrument",
+            description: "Delete a custom instrument definition. Any sessions where it's currently attached have the instance removed automatically.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"def_id":{"type":"string"}},"required":["def_id"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let defID = (invocation.args["def_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid def_id")
+            }
+            guard engine.customInstruments.def(withId: defID) != nil else {
+                return errorResult("no custom instrument with id \(defID)")
+            }
+            await engine.deleteCustomInstrument(defID)
+            return makeResult(jsonObject: ["def_id": defID.uuidString, "removed": true], summary: "Deleted custom instrument \(defID)")
+        }
+    }
+
+    private static func registerAttachCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "attach_custom_instrument",
+            description: "Attach a custom instrument definition to an existing session. Each session can hold multiple custom instances; this tool always creates a new instance.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"def_id":{"type":"string"}},"required":["session_id","def_id"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let defID = (invocation.args["def_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid def_id")
+            }
+            guard let instance = await engine.attachCustomInstrument(sessionID: sessionID, defID: defID) else {
+                return errorResult("could not attach: no custom instrument with id \(defID)")
+            }
+            let payload: [String: Any] = [
+                "instrument_id": instance.id.uuidString,
+                "def_id": defID.uuidString,
+                "session_id": sessionID.uuidString,
+            ]
+            return makeResult(jsonObject: payload, summary: "Attached custom instrument to session")
+        }
+    }
+
+    private static func describeIcon(_ icon: InstrumentIcon) -> String {
+        switch icon {
+        case .symbolic(let id): return id
+        case .pixels: return "pixels"
+        }
+    }
+
+    private static func parseIconArg(_ raw: String?) -> InstrumentIcon {
+        guard let raw, !raw.isEmpty else {
+            return .symbolic(InstrumentIconCatalog.default.id)
+        }
+        return .symbolic(InstrumentIconCatalog.concept(forID: raw).id)
+    }
+
+    private static func parseFeaturesArg(_ raw: Any?) -> [CustomInstrumentDef.Feature] {
+        guard let arr = raw as? [[String: Any]] else { return [] }
+        return arr.compactMap { obj in
+            guard let id = obj["id"] as? String, let name = obj["name"] as? String else { return nil }
+            let enabled = (obj["enabled_by_default"] as? Bool) ?? true
+            return CustomInstrumentDef.Feature(id: id, name: name, schema: .boolean, optional: false, enabledByDefault: enabled)
+        }
+    }
+
+    private static func customInstrumentJSON(def: CustomInstrumentDef) -> [String: Any] {
+        let features: [[String: Any]] = def.features.map { feature in
+            [
+                "id": feature.id,
+                "name": feature.name,
+                "enabled_by_default": feature.enabledByDefault,
+            ]
+        }
+        return [
+            "id": def.id.uuidString,
+            "name": def.name,
+            "icon": describeIcon(def.icon),
+            "source": def.source,
+            "features": features,
+        ]
     }
 
     // MARK: - record_finding (observe — auto-runs, validates evidence)

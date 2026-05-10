@@ -2713,6 +2713,19 @@ public final class Engine {
         await reloadCustomInstrumentInstances(def: updated)
     }
 
+    public func attachCustomInstrument(sessionID: UUID, defID: UUID) async -> InstrumentInstance? {
+        guard let def = customInstruments.def(withId: defID) else { return nil }
+        let states = CustomInstrumentLibrary.initialFeatureStates(for: def)
+        let config = CustomInstrumentConfig(defID: defID, features: states)
+        let configJSON = (try? JSONEncoder().encode(config)) ?? Data("{}".utf8)
+        return await addInstrument(
+            kind: .custom,
+            sourceIdentifier: defID.uuidString,
+            configJSON: configJSON,
+            sessionID: sessionID
+        )
+    }
+
     public func deleteCustomInstrument(_ defID: UUID) async {
         let key = defID.uuidString
         let doomedInstances = instrumentsBySession.values
