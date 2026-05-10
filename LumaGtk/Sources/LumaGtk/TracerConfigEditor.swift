@@ -273,7 +273,7 @@ final class TracerConfigEditor {
 
             if hook.kind == .function {
                 let itraceSwitch = Switch()
-                itraceSwitch.active = hook.itraceEnabled
+                itraceSwitch.active = hook.itraceArming != nil
                 itraceSwitch.valign = .center
                 itraceSwitch.tooltipText = "Capture instruction trace for each call"
                 itraceSwitch.onStateSet { [weak self] _, state in
@@ -475,7 +475,8 @@ final class TracerConfigEditor {
 
     private func toggleITrace(id: UUID, enabled: Bool) {
         guard let idx = config.hooks.firstIndex(where: { $0.id == id }) else { return }
-        config.hooks[idx].itraceEnabled = enabled
+        let existing = config.hooks[idx].itraceArming
+        config.hooks[idx].itraceArming = enabled ? (existing ?? ITraceArming()) : nil
         emit()
     }
 
@@ -1160,7 +1161,7 @@ private final class HooksList {
             }
             nameRow.append(child: titleLabel)
 
-            if hook.itraceEnabled {
+            if hook.itraceArming != nil {
                 let badge = Label(str: "IT")
                 badge.add(cssClass: "caption")
                 badge.add(cssClass: "luma-itrace-badge")
@@ -1455,7 +1456,7 @@ final class EditorPane {
             titleLabel?.label = hook.displayName.isEmpty ? "(unnamed)" : hook.displayName
             subtitleLabel?.label = hook.addressAnchor.displayString
             enabledSwitch?.active = hook.isEnabled
-            itraceSwitch?.active = hook.itraceEnabled
+            itraceSwitch?.active = hook.itraceArming != nil
             draftCode = hook.code
             monaco.setText(hook.code)
             isDirty = false
@@ -1481,10 +1482,11 @@ final class EditorPane {
             return
         }
         if showToolbar {
+            let itraceOn = hook.itraceArming != nil
             isDirty =
                 draftCode != hook.code
                 || (enabledSwitch?.active ?? hook.isEnabled) != hook.isEnabled
-                || (itraceSwitch?.active ?? hook.itraceEnabled) != hook.itraceEnabled
+                || (itraceSwitch?.active ?? itraceOn) != itraceOn
         } else {
             isDirty = draftCode != hook.code
         }
@@ -1498,7 +1500,8 @@ final class EditorPane {
         hook.code = draftCode
         if showToolbar {
             hook.isEnabled = enabledSwitch?.active ?? hook.isEnabled
-            hook.itraceEnabled = itraceSwitch?.active ?? hook.itraceEnabled
+            let itraceOn = itraceSwitch?.active ?? (hook.itraceArming != nil)
+            hook.itraceArming = itraceOn ? (hook.itraceArming ?? ITraceArming()) : nil
         }
         self.hook = hook
         isDirty = false
