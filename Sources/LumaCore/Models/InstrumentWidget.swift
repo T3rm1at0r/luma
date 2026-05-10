@@ -31,10 +31,14 @@ public struct InstrumentWidget: Codable, Identifiable, Sendable, Equatable {
     }
 
     public struct GraphConfig: Codable, Sendable, Equatable {
-        public var series: [Series]
+        public static let defaultMaxPoints: Int = 5_000
 
-        public init(series: [Series] = []) {
+        public var series: [Series]
+        public var maxPoints: Int
+
+        public init(series: [Series] = [], maxPoints: Int = Self.defaultMaxPoints) {
             self.series = series
+            self.maxPoints = maxPoints
         }
     }
 
@@ -49,10 +53,14 @@ public struct InstrumentWidget: Codable, Identifiable, Sendable, Equatable {
     }
 
     public struct ListConfig: Codable, Sendable, Equatable {
-        public var actions: [Action]
+        public static let defaultMaxItems: Int = 1_000
 
-        public init(actions: [Action] = []) {
+        public var actions: [Action]
+        public var maxItems: Int
+
+        public init(actions: [Action] = [], maxItems: Int = Self.defaultMaxItems) {
             self.actions = actions
+            self.maxItems = maxItems
         }
     }
 

@@ -192,4 +192,17 @@ public struct WidgetState: Codable, Sendable, Equatable {
             listItems.removeAll()
         }
     }
+
+    public mutating func cap(to kind: InstrumentWidget.Kind) {
+        switch kind {
+        case .graph(let cfg):
+            for (seriesID, points) in graphSeries where points.count > cfg.maxPoints {
+                graphSeries[seriesID] = Array(points.suffix(cfg.maxPoints))
+            }
+        case .list(let cfg):
+            if listItems.count > cfg.maxItems {
+                listItems = Array(listItems.suffix(cfg.maxItems))
+            }
+        }
+    }
 }

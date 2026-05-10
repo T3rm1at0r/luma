@@ -2949,17 +2949,16 @@ public final class Engine {
     }
 
     private func applyWidgetUpdate(_ update: WidgetUpdate, sessionID: UUID, origin: WidgetUpdateOrigin) {
+        let widgetDef = widget(forInstanceID: update.instanceID, widgetID: update.widget)
         var states = widgetStates[update.instanceID, default: [:]]
         var state = states[update.widget, default: WidgetState()]
         state.apply(update.kind)
+        if let widgetDef { state.cap(to: widgetDef.kind) }
         states[update.widget] = state
         widgetStates[update.instanceID] = states
         _widgetUpdates.yield(update)
 
-        if localUserHosts(sessionID),
-            let widget = widget(forInstanceID: update.instanceID, widgetID: update.widget),
-            widget.persistence == .session
-        {
+        if localUserHosts(sessionID), widgetDef?.persistence == .session {
             try? store.saveWidgetState(
                 instanceID: update.instanceID,
                 widgetID: update.widget,

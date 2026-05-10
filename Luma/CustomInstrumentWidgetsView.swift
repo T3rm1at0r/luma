@@ -262,10 +262,56 @@ private struct WidgetRow: View {
     private var kindEditor: some View {
         switch widget.kind {
         case .graph:
-            GraphSeriesEditor(series: graphSeriesBinding)
+            VStack(alignment: .leading, spacing: 8) {
+                capRow(label: "Max points / series", binding: graphMaxPointsBinding)
+                GraphSeriesEditor(series: graphSeriesBinding)
+            }
         case .list:
-            ListActionsEditor(actions: listActionsBinding)
+            VStack(alignment: .leading, spacing: 8) {
+                capRow(label: "Max items", binding: listMaxItemsBinding)
+                ListActionsEditor(actions: listActionsBinding)
+            }
         }
+    }
+
+    private func capRow(label: String, binding: Binding<Int>) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.subheadline).frame(width: 160, alignment: .leading)
+            TextField("", value: binding, formatter: capFormatter)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 120)
+            Spacer()
+        }
+    }
+
+    private var graphMaxPointsBinding: Binding<Int> {
+        Binding(
+            get: {
+                if case .graph(let cfg) = widget.kind { return cfg.maxPoints }
+                return InstrumentWidget.GraphConfig.defaultMaxPoints
+            },
+            set: { newValue in
+                if case .graph(var cfg) = widget.kind {
+                    cfg.maxPoints = max(1, newValue)
+                    widget.kind = .graph(cfg)
+                }
+            }
+        )
+    }
+
+    private var listMaxItemsBinding: Binding<Int> {
+        Binding(
+            get: {
+                if case .list(let cfg) = widget.kind { return cfg.maxItems }
+                return InstrumentWidget.ListConfig.defaultMaxItems
+            },
+            set: { newValue in
+                if case .list(var cfg) = widget.kind {
+                    cfg.maxItems = max(1, newValue)
+                    widget.kind = .list(cfg)
+                }
+            }
+        )
     }
 
     private var persistenceBinding: Binding<InstrumentWidget.Persistence> {
@@ -480,3 +526,11 @@ private struct ListActionsEditor: View {
 }
 
 private enum ChildFocus: Hashable { case id, name }
+
+private let capFormatter: NumberFormatter = {
+    let f = NumberFormatter()
+    f.numberStyle = .none
+    f.allowsFloats = false
+    f.minimum = 1
+    return f
+}()

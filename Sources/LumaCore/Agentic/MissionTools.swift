@@ -1805,7 +1805,7 @@ public enum MissionTools {
     }
 
     private static let widgetsSchemaJSON: String = """
-        {"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"kind":{"type":"string","enum":["graph","list"]},"persistence":{"type":"string","enum":["none","session"],"default":"none","description":"'none' = data lives in memory, lost on detach. 'session' = data survives reattach and app restart, replayed to create() via the `restored` argument."},"series":{"type":"array","description":"For kind=graph: line series the agent will push points to.","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":false}},"actions":{"type":"array","description":"For kind=list: per-item action buttons; clicks invoke onAction with {widget,action,item}.","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":false}}},"required":["id","name","kind"],"additionalProperties":false}}
+        {"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"kind":{"type":"string","enum":["graph","list"]},"persistence":{"type":"string","enum":["none","session"],"default":"none","description":"'none' = data lives in memory, lost on detach. 'session' = data survives reattach and app restart, replayed to create() via the `restored` argument."},"max_points":{"type":"integer","minimum":1,"default":5000,"description":"For kind=graph: rolling cap per series. Oldest points drop when exceeded."},"max_items":{"type":"integer","minimum":1,"default":1000,"description":"For kind=list: rolling cap. Oldest items drop when exceeded."},"series":{"type":"array","description":"For kind=graph: line series the agent will push points to.","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":false}},"actions":{"type":"array","description":"For kind=list: per-item action buttons; clicks invoke onAction with {widget,action,item}.","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":false}}},"required":["id","name","kind"],"additionalProperties":false}}
         """
 
     private static func parseWidgetsArg(_ raw: Any?) -> [InstrumentWidget] {
@@ -1818,31 +1818,35 @@ public enum MissionTools {
             let persistence = (obj["persistence"] as? String).flatMap(InstrumentWidget.Persistence.init(rawValue:)) ?? .none
             switch kindStr {
             case "graph":
-                return InstrumentWidget(id: id, name: name, kind: .graph(parseGraphConfigArg(obj["series"])), persistence: persistence)
+                let cfg = parseGraphConfigArg(seriesRaw: obj["series"], maxPointsRaw: obj["max_points"])
+                return InstrumentWidget(id: id, name: name, kind: .graph(cfg), persistence: persistence)
             case "list":
-                return InstrumentWidget(id: id, name: name, kind: .list(parseListConfigArg(obj["actions"])), persistence: persistence)
+                let cfg = parseListConfigArg(actionsRaw: obj["actions"], maxItemsRaw: obj["max_items"])
+                return InstrumentWidget(id: id, name: name, kind: .list(cfg), persistence: persistence)
             default:
                 return nil
             }
         }
     }
 
-    private static func parseGraphConfigArg(_ raw: Any?) -> InstrumentWidget.GraphConfig {
-        let entries = (raw as? [[String: Any]]) ?? []
+    private static func parseGraphConfigArg(seriesRaw: Any?, maxPointsRaw: Any?) -> InstrumentWidget.GraphConfig {
+        let entries = (seriesRaw as? [[String: Any]]) ?? []
         let series = entries.compactMap { obj -> InstrumentWidget.Series? in
             guard let sid = obj["id"] as? String, let sname = obj["name"] as? String else { return nil }
             return InstrumentWidget.Series(id: sid, name: sname)
         }
-        return InstrumentWidget.GraphConfig(series: series)
+        let maxPoints = (maxPointsRaw as? Int) ?? InstrumentWidget.GraphConfig.defaultMaxPoints
+        return InstrumentWidget.GraphConfig(series: series, maxPoints: max(1, maxPoints))
     }
 
-    private static func parseListConfigArg(_ raw: Any?) -> InstrumentWidget.ListConfig {
-        let entries = (raw as? [[String: Any]]) ?? []
+    private static func parseListConfigArg(actionsRaw: Any?, maxItemsRaw: Any?) -> InstrumentWidget.ListConfig {
+        let entries = (actionsRaw as? [[String: Any]]) ?? []
         let actions = entries.compactMap { obj -> InstrumentWidget.Action? in
             guard let aid = obj["id"] as? String, let aname = obj["name"] as? String else { return nil }
             return InstrumentWidget.Action(id: aid, name: aname)
         }
-        return InstrumentWidget.ListConfig(actions: actions)
+        let maxItems = (maxItemsRaw as? Int) ?? InstrumentWidget.ListConfig.defaultMaxItems
+        return InstrumentWidget.ListConfig(actions: actions, maxItems: max(1, maxItems))
     }
 
     private static func customInstrumentJSON(def: CustomInstrumentDef) -> [String: Any] {
@@ -1874,9 +1878,11 @@ public enum MissionTools {
         case .graph(let cfg):
             obj["kind"] = "graph"
             obj["series"] = cfg.series.map { ["id": $0.id, "name": $0.name] }
+            obj["max_points"] = cfg.maxPoints
         case .list(let cfg):
             obj["kind"] = "list"
             obj["actions"] = cfg.actions.map { ["id": $0.id, "name": $0.name] }
+            obj["max_items"] = cfg.maxItems
         }
         return obj
     }

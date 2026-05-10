@@ -319,6 +319,9 @@ final class CustomInstrumentWidgetsDialog {
 
     private func graphSeriesEditor(initial: [InstrumentWidget.Series], index: Int) -> Box {
         let outer = Box(orientation: .vertical, spacing: 4)
+
+        outer.append(child: graphCapRow(widgetIndex: index))
+
         let header = Label(str: "Series")
         header.halign = .start
         header.add(cssClass: "caption")
@@ -330,6 +333,31 @@ final class CustomInstrumentWidgetsDialog {
 
         outer.append(child: seriesAddRow(into: listBox, widgetIndex: index))
         return outer
+    }
+
+    private func graphCapRow(widgetIndex: Int) -> Box {
+        let row = Box(orientation: .horizontal, spacing: 8)
+        let label = Label(str: "Max points / series")
+        label.halign = .start
+        label.setSizeRequest(width: 160, height: -1)
+        row.append(child: label)
+        let entry = Entry()
+        if case .graph(let cfg) = draftWidgets[widgetIndex].kind {
+            entry.text = String(cfg.maxPoints)
+        }
+        entry.setSizeRequest(width: 120, height: -1)
+        entry.onChanged { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, widgetIndex < self.draftWidgets.count,
+                    case .graph(var cfg) = self.draftWidgets[widgetIndex].kind,
+                    let value = Int(entry.text ?? ""), value >= 1
+                else { return }
+                cfg.maxPoints = value
+                self.draftWidgets[widgetIndex].kind = .graph(cfg)
+            }
+        }
+        row.append(child: entry)
+        return row
     }
 
     private func rebuildSeriesRows(into list: Box, items: [InstrumentWidget.Series], widgetIndex: Int) {
@@ -434,6 +462,9 @@ final class CustomInstrumentWidgetsDialog {
 
     private func listActionsEditor(initial: [InstrumentWidget.Action], index: Int) -> Box {
         let outer = Box(orientation: .vertical, spacing: 4)
+
+        outer.append(child: listCapRow(widgetIndex: index))
+
         let header = Label(str: "Actions")
         header.halign = .start
         header.add(cssClass: "caption")
@@ -445,6 +476,31 @@ final class CustomInstrumentWidgetsDialog {
 
         outer.append(child: actionsAddRow(into: listBox, widgetIndex: index))
         return outer
+    }
+
+    private func listCapRow(widgetIndex: Int) -> Box {
+        let row = Box(orientation: .horizontal, spacing: 8)
+        let label = Label(str: "Max items")
+        label.halign = .start
+        label.setSizeRequest(width: 160, height: -1)
+        row.append(child: label)
+        let entry = Entry()
+        if case .list(let cfg) = draftWidgets[widgetIndex].kind {
+            entry.text = String(cfg.maxItems)
+        }
+        entry.setSizeRequest(width: 120, height: -1)
+        entry.onChanged { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, widgetIndex < self.draftWidgets.count,
+                    case .list(var cfg) = self.draftWidgets[widgetIndex].kind,
+                    let value = Int(entry.text ?? ""), value >= 1
+                else { return }
+                cfg.maxItems = value
+                self.draftWidgets[widgetIndex].kind = .list(cfg)
+            }
+        }
+        row.append(child: entry)
+        return row
     }
 
     private func rebuildActionRows(into list: Box, items: [InstrumentWidget.Action], widgetIndex: Int) {
