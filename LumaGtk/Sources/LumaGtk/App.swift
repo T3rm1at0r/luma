@@ -186,7 +186,12 @@ final class LumaApplication {
     }
 
     func windowDidClose(_ window: MainWindow) {
-        openDocuments[ObjectIdentifier(window)] = nil
+        let entry = openDocuments.removeValue(forKey: ObjectIdentifier(window))
+        if let entry {
+            Task { @MainActor in
+                await entry.engine.shutdown()
+            }
+        }
         if openDocuments.isEmpty && activeWelcome == nil {
             showWelcome()
         }
