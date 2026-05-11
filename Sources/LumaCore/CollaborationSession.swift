@@ -357,7 +357,7 @@ public final class CollaborationSession {
                 setStatus(.error(message: failure.message))
                 await onAuthRejected?(failure)
             } else {
-                setStatus(.error(message: String(describing: error)))
+                setStatus(.error(message: error.localizedDescription))
             }
         }
     }

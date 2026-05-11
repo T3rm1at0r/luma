@@ -97,7 +97,7 @@ public final class WelcomeModel {
                 await gitHubAuth.signOut()
                 labsState = .failed(message: failure.message)
             } else {
-                labsState = .failed(message: String(describing: error))
+                labsState = .failed(message: error.localizedDescription)
             }
         }
     }

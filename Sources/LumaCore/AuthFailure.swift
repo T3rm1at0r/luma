@@ -33,13 +33,7 @@ public struct AuthFailure: Sendable, Decodable, Swift.Error {
         // times on its way up) can't corrupt the base64 alphabet, so we
         // just scan for the marker and decode the payload up to the
         // first non-base64 byte.
-        let text: String
-        if let fridaError = error as? Frida.Error {
-            text = fridaError.description
-        } else {
-            text = String(describing: error)
-        }
-
+        let text = String(describing: error)
         guard let markerRange = text.range(of: marker) else { return nil }
         let tail = text[markerRange.upperBound...]
         let base64End = tail.firstIndex { !base64Alphabet.contains($0) } ?? tail.endIndex
