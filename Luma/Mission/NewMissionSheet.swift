@@ -156,7 +156,7 @@ struct NewMissionSheet: View {
 
     private var currentProviderSupportsCustomBaseURL: Bool {
         engine.llmRegistry.provider(id: selectedProviderID)?
-            .descriptor.capabilities.supportsCustomBaseURL ?? false
+            .descriptor.capabilities.supports(.customBaseURL) ?? false
     }
 
     private var baseURLPlaceholder: String {
@@ -182,12 +182,12 @@ struct NewMissionSheet: View {
 
     private var currentProviderRequiresKey: Bool {
         engine.llmRegistry.provider(id: selectedProviderID)?
-            .descriptor.capabilities.requiresAPIKey ?? false
+            .descriptor.capabilities.supports(.apiKey) ?? false
     }
 
     private var currentProviderSupportsThinking: Bool {
         engine.llmRegistry.provider(id: selectedProviderID)?
-            .descriptor.capabilities.supportsThinking ?? false
+            .descriptor.capabilities.supports(.thinking) ?? false
     }
 
     private var reasoningEffortOptions: [String] {

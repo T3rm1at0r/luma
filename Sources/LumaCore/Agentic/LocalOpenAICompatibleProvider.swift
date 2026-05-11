@@ -16,12 +16,7 @@ public struct LocalOpenAICompatibleProvider: LLMProvider {
             id: Self.providerID,
             displayName: "Local (OpenAI-compatible)",
             capabilities: LLMProviderCapabilities(
-                supportsStreaming: true,
-                supportsPromptCaching: false,
-                supportsThinking: false,
-                supportsToolUse: true,
-                requiresAPIKey: false,
-                supportsCustomBaseURL: true
+                supported: [.streaming, .toolUse, .customBaseURL]
             ),
             defaultModelID: nil,
             summarizationModelID: nil,
@@ -47,7 +42,7 @@ public struct LocalOpenAICompatibleProvider: LLMProvider {
             apiKey: apiKey,
             baseURL: baseURL ?? descriptor.defaultBaseURL,
             session: session,
-            requiresAPIKey: descriptor.capabilities.requiresAPIKey
+            requiresAPIKey: descriptor.capabilities.supports(.apiKey)
         )
     }
 }

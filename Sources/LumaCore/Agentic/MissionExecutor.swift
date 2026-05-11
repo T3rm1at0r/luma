@@ -72,7 +72,7 @@ public final class MissionExecutor {
             return
         }
         let apiKey = (try? await credentials.apiKey(providerID: mission.providerID)) ?? nil
-        if provider.descriptor.capabilities.requiresAPIKey, apiKey == nil {
+        if provider.descriptor.capabilities.supports(.apiKey), apiKey == nil {
             failMission(&mission, reason: "Missing API key for provider \(mission.providerID)")
             return
         }

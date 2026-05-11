@@ -16,12 +16,7 @@ public struct OpenAIProvider: LLMProvider {
             id: Self.providerID,
             displayName: "OpenAI",
             capabilities: LLMProviderCapabilities(
-                supportsStreaming: true,
-                supportsPromptCaching: false,
-                supportsThinking: true,
-                supportsToolUse: true,
-                requiresAPIKey: true,
-                supportsCustomBaseURL: false
+                supported: [.streaming, .thinking, .toolUse, .apiKey]
             ),
             defaultModelID: nil,
             summarizationModelID: nil,
@@ -47,7 +42,7 @@ public struct OpenAIProvider: LLMProvider {
             apiKey: apiKey,
             baseURL: baseURL ?? descriptor.defaultBaseURL,
             session: session,
-            requiresAPIKey: descriptor.capabilities.requiresAPIKey
+            requiresAPIKey: descriptor.capabilities.supports(.apiKey)
         )
     }
 }
@@ -99,9 +94,7 @@ func fetchOpenAICompatibleModels(
             id: id,
             displayName: id,
             contextWindow: 128_000,
-            maxOutput: 16_384,
-            supportsCaching: false,
-            supportsThinking: false
+            maxOutput: 16_384
         )
     }
     .sorted { $0.id < $1.id }

@@ -236,15 +236,23 @@ public struct LLMModelInfo: Sendable, Hashable, Codable {
     public var displayName: String
     public var contextWindow: Int
     public var maxOutput: Int
-    public var supportsCaching: Bool
-    public var supportsThinking: Bool
+    public var capabilities: Set<LLMCapability>
 
-    public init(id: String, displayName: String, contextWindow: Int, maxOutput: Int, supportsCaching: Bool, supportsThinking: Bool) {
+    public init(
+        id: String,
+        displayName: String,
+        contextWindow: Int,
+        maxOutput: Int,
+        capabilities: Set<LLMCapability> = []
+    ) {
         self.id = id
         self.displayName = displayName
         self.contextWindow = contextWindow
         self.maxOutput = maxOutput
-        self.supportsCaching = supportsCaching
-        self.supportsThinking = supportsThinking
+        self.capabilities = capabilities
+    }
+
+    public func supports(_ capability: LLMCapability) -> Bool {
+        capabilities.contains(capability)
     }
 }

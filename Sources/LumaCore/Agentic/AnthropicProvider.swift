@@ -16,12 +16,7 @@ public struct AnthropicProvider: LLMProvider {
             id: Self.providerID,
             displayName: "Anthropic",
             capabilities: LLMProviderCapabilities(
-                supportsStreaming: true,
-                supportsPromptCaching: true,
-                supportsThinking: true,
-                supportsToolUse: true,
-                requiresAPIKey: true,
-                supportsCustomBaseURL: false
+                supported: [.streaming, .promptCaching, .thinking, .toolUse, .apiKey]
             ),
             defaultModelID: "claude-sonnet-4-6",
             summarizationModelID: "claude-haiku-4-5-20251001",
@@ -31,9 +26,9 @@ public struct AnthropicProvider: LLMProvider {
 
     public func suggestedModels(apiKey: String?, baseURL: URL?) async throws -> [LLMModelInfo] {
         [
-            LLMModelInfo(id: "claude-opus-4-7", displayName: "Claude Opus 4.7", contextWindow: 200_000, maxOutput: 32_000, supportsCaching: true, supportsThinking: true),
-            LLMModelInfo(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", contextWindow: 200_000, maxOutput: 64_000, supportsCaching: true, supportsThinking: true),
-            LLMModelInfo(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", contextWindow: 200_000, maxOutput: 8_192, supportsCaching: true, supportsThinking: false),
+            LLMModelInfo(id: "claude-opus-4-7", displayName: "Claude Opus 4.7", contextWindow: 200_000, maxOutput: 32_000, capabilities: [.promptCaching, .thinking]),
+            LLMModelInfo(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", contextWindow: 200_000, maxOutput: 64_000, capabilities: [.promptCaching, .thinking]),
+            LLMModelInfo(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", contextWindow: 200_000, maxOutput: 8_192, capabilities: [.promptCaching]),
         ]
     }
 

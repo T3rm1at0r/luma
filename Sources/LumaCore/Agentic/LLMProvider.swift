@@ -1,33 +1,31 @@
 import Foundation
 
+public enum LLMCapability: String, Sendable, Hashable, CaseIterable, Codable {
+    case streaming
+    case promptCaching
+    case thinking
+    case toolUse
+    case apiKey
+    case customBaseURL
+}
+
 public struct LLMProviderCapabilities: Sendable, Hashable {
-    public var supportsStreaming: Bool
-    public var supportsPromptCaching: Bool
-    public var supportsThinking: Bool
-    public var supportsToolUse: Bool
-    public var requiresAPIKey: Bool
-    public var supportsCustomBaseURL: Bool
+    public var supported: Set<LLMCapability>
     public var reasoningEffortOptions: [String]
     public var defaultReasoningEffort: String?
 
     public init(
-        supportsStreaming: Bool,
-        supportsPromptCaching: Bool,
-        supportsThinking: Bool,
-        supportsToolUse: Bool,
-        requiresAPIKey: Bool,
-        supportsCustomBaseURL: Bool,
+        supported: Set<LLMCapability> = [],
         reasoningEffortOptions: [String] = [],
         defaultReasoningEffort: String? = nil
     ) {
-        self.supportsStreaming = supportsStreaming
-        self.supportsPromptCaching = supportsPromptCaching
-        self.supportsThinking = supportsThinking
-        self.supportsToolUse = supportsToolUse
-        self.requiresAPIKey = requiresAPIKey
-        self.supportsCustomBaseURL = supportsCustomBaseURL
+        self.supported = supported
         self.reasoningEffortOptions = reasoningEffortOptions
         self.defaultReasoningEffort = defaultReasoningEffort
+    }
+
+    public func supports(_ capability: LLMCapability) -> Bool {
+        supported.contains(capability)
     }
 }
 

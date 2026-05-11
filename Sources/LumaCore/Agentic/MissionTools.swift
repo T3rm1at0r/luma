@@ -2754,7 +2754,7 @@ public enum MissionTools {
             return .failure("provider \(providerID) not registered")
         }
         let apiKey = (try? await engine.llmCredentials.apiKey(providerID: providerID)) ?? nil
-        if provider.descriptor.capabilities.requiresAPIKey, apiKey == nil {
+        if provider.descriptor.capabilities.supports(.apiKey), apiKey == nil {
             return .failure("missing API key for provider \(providerID)")
         }
 

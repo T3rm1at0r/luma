@@ -426,7 +426,7 @@ final class NewMissionDialog {
         }
         let descriptor = provider.descriptor
 
-        let supportsCustomBaseURL = descriptor.capabilities.supportsCustomBaseURL
+        let supportsCustomBaseURL = descriptor.capabilities.supports(.customBaseURL)
         baseURLRow.visible = supportsCustomBaseURL
         if supportsCustomBaseURL {
             let stored = LumaAppState.shared.providerBaseURL(providerID: selectedProviderID) ?? ""
@@ -436,7 +436,7 @@ final class NewMissionDialog {
             baseURLEntry.placeholderText = descriptor.defaultBaseURL.absoluteString
         }
         let configuredBaseURL = effectiveBaseURL()
-        let requiresKey = descriptor.capabilities.requiresAPIKey
+        let requiresKey = descriptor.capabilities.supports(.apiKey)
         let typedKey = trimmedAPIKey
 
         reasoningEffortOptions = descriptor.capabilities.reasoningEffortOptions
@@ -451,7 +451,7 @@ final class NewMissionDialog {
         }
         apiKeyEntry.placeholderText = "API key for \(descriptor.displayName)"
 
-        thinkingSection.visible = !hasReasoningOptions && descriptor.capabilities.supportsThinking
+        thinkingSection.visible = !hasReasoningOptions && descriptor.capabilities.supports(.thinking)
         if !thinkingSection.visible {
             thinkingBudgetRow.visible = false
         } else {
@@ -587,7 +587,7 @@ final class NewMissionDialog {
     }
 
     private var currentProviderSupportsCustomBaseURL: Bool {
-        engine?.llmRegistry.provider(id: selectedProviderID)?.descriptor.capabilities.supportsCustomBaseURL
+        engine?.llmRegistry.provider(id: selectedProviderID)?.descriptor.capabilities.supports(.customBaseURL)
             ?? false
     }
 
@@ -599,7 +599,7 @@ final class NewMissionDialog {
     }
 
     private var currentProviderRequiresKey: Bool {
-        engine?.llmRegistry.provider(id: selectedProviderID)?.descriptor.capabilities.requiresAPIKey
+        engine?.llmRegistry.provider(id: selectedProviderID)?.descriptor.capabilities.supports(.apiKey)
             ?? false
     }
 

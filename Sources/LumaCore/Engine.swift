@@ -3778,7 +3778,7 @@ public final class Engine {
         guard !modelID.isEmpty else { return }
 
         var apiKey: String?
-        if descriptor.capabilities.requiresAPIKey {
+        if descriptor.capabilities.supports(.apiKey) {
             apiKey = try? await llmCredentials.apiKey(providerID: providerID)
             guard let key = apiKey, !key.isEmpty else { return }
         }

@@ -21,12 +21,7 @@ public final class ClaudeCodeProvider: LLMProvider {
             id: Self.providerID,
             displayName: "Claude Code (subprocess)",
             capabilities: LLMProviderCapabilities(
-                supportsStreaming: false,
-                supportsPromptCaching: false,
-                supportsThinking: false,
-                supportsToolUse: engine != nil,
-                requiresAPIKey: false,
-                supportsCustomBaseURL: false,
+                supported: engine != nil ? [.toolUse] : [],
                 reasoningEffortOptions: ["auto", "low", "medium", "high", "xhigh", "max"],
                 defaultReasoningEffort: "auto"
             ),
@@ -38,10 +33,10 @@ public final class ClaudeCodeProvider: LLMProvider {
 
     nonisolated public func suggestedModels(apiKey: String?, baseURL: URL?) async throws -> [LLMModelInfo] {
         [
-            LLMModelInfo(id: "default", displayName: "Default (Claude Code's choice)", contextWindow: 200_000, maxOutput: 8_192, supportsCaching: false, supportsThinking: false),
-            LLMModelInfo(id: "sonnet", displayName: "Sonnet", contextWindow: 200_000, maxOutput: 16_384, supportsCaching: false, supportsThinking: false),
-            LLMModelInfo(id: "opus", displayName: "Opus", contextWindow: 200_000, maxOutput: 16_384, supportsCaching: false, supportsThinking: false),
-            LLMModelInfo(id: "haiku", displayName: "Haiku", contextWindow: 200_000, maxOutput: 8_192, supportsCaching: false, supportsThinking: false),
+            LLMModelInfo(id: "default", displayName: "Default (Claude Code's choice)", contextWindow: 200_000, maxOutput: 8_192),
+            LLMModelInfo(id: "sonnet", displayName: "Sonnet", contextWindow: 200_000, maxOutput: 16_384),
+            LLMModelInfo(id: "opus", displayName: "Opus", contextWindow: 200_000, maxOutput: 16_384),
+            LLMModelInfo(id: "haiku", displayName: "Haiku", contextWindow: 200_000, maxOutput: 8_192),
         ]
     }
 
