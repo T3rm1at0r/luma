@@ -11,7 +11,6 @@ final class NewMissionDialog {
     private let dialog: Adw.Dialog
     private let parentWindow: Gtk.Window
     private weak var engine: Engine?
-    private weak var workspaceUIState: ProjectUIStateBox?
     private let onCreated: OnCreated
 
     private let goalView: TextView
@@ -50,12 +49,10 @@ final class NewMissionDialog {
     init(
         parent: Gtk.Window,
         engine: Engine,
-        uiState: ProjectUIStateBox,
         onCreated: @escaping OnCreated
     ) {
         self.parentWindow = parent
         self.engine = engine
-        self.workspaceUIState = uiState
         self.onCreated = onCreated
 
         let defaults = LumaAppState.shared.missionDefaults
@@ -673,24 +670,3 @@ final class NewMissionDialog {
     }
 }
 
-@MainActor
-final class ProjectUIStateBox {
-    private(set) var value: ProjectUIState
-    private let onChange: (ProjectUIState) -> Void
-
-    init(value: ProjectUIState, onChange: @escaping (ProjectUIState) -> Void) {
-        self.value = value
-        self.onChange = onChange
-    }
-
-    func update(_ mutate: (inout ProjectUIState) -> Void) {
-        var draft = value
-        mutate(&draft)
-        value = draft
-        onChange(draft)
-    }
-
-    func reload(_ value: ProjectUIState) {
-        self.value = value
-    }
-}

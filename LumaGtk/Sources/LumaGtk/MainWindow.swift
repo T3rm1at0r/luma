@@ -38,7 +38,6 @@ final class MainWindow {
     private var missionRowIDs: [UUID] = []
     private var currentMissionsListPane: MissionsListPane?
     private var currentMissionDetailPane: MissionDetailPane?
-    private var projectUIStateBox: ProjectUIStateBox!
     private let detailContainer: Box
     private let eventStreamPane: EventStreamPane
     private var notebookPane: NotebookPane?
@@ -82,7 +81,10 @@ final class MainWindow {
     private var eventStreamHost: Box!
     private var detailHost: Widget!
     private var toastOverlay: ToastOverlay!
-    private var isCollaborationPanelVisible: Bool = false
+
+    private var isCollaborationPanelVisible: Bool {
+        engine?.projectUIState.isCollaborationPanelVisible ?? false
+    }
 
     private enum SidebarSelection: Equatable {
         case notebook
@@ -311,7 +313,7 @@ final class MainWindow {
     }
 
     private func setCollaborationVisible(_ visible: Bool) {
-        isCollaborationPanelVisible = visible
+        engine?.setCollaborationPanelVisible(visible)
         collaborationPanel?.widget.visible = visible
     }
 
@@ -446,12 +448,7 @@ final class MainWindow {
         }
         engine.populateSessionList()
         renderPackages(engine.installedPackages)
-        let initialUIState = (try? engine.store.fetchProjectUIState()) ?? ProjectUIState()
-        let store = engine.store
-        projectUIStateBox = ProjectUIStateBox(value: initialUIState) { state in
-            try? store.save(state)
-        }
-        let initialMissions = (try? store.fetchMissions()) ?? []
+        let initialMissions = (try? engine.store.fetchMissions()) ?? []
         renderMissions(initialMissions)
         engine.onMissionsChanged = { [weak self] missions in
             self?.renderMissions(missions)
@@ -827,11 +824,10 @@ final class MainWindow {
     }
 
     private func openNewMissionDialog() {
-        guard let engine, let projectUIStateBox else { return }
+        guard let engine else { return }
         let dialog = NewMissionDialog(
             parent: window,
-            engine: engine,
-            uiState: projectUIStateBox
+            engine: engine
         ) { [weak self] mission in
             guard let self else { return }
             self.select(.mission(mission.id))
