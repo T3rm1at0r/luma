@@ -54,11 +54,9 @@ public final class EngineRegistry {
 
     public func release(workingProjectURL: URL) async {
         let key = workingProjectURL.standardizedFileURL
-        if let pending = startTasks.removeValue(forKey: key) {
-            await pending.value
-        }
-        if let engine = engines.removeValue(forKey: key) {
-            await engine.shutdown()
-        }
+        let pending = startTasks.removeValue(forKey: key)
+        let engine = engines.removeValue(forKey: key)
+        await pending?.value
+        await engine?.shutdown()
     }
 }
