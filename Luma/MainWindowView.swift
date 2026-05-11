@@ -127,8 +127,9 @@ private struct ProjectContentView: View {
             LumaAppState.shared.lastDocumentPath = newPath
         }
         .onDisappear {
+            let url = projectURL
             Task { @MainActor in
-                await engine.collaboration.stop()
+                await EngineRegistry.shared.release(workingProjectURL: url)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ProjectStore.didCommitNotification)) { note in

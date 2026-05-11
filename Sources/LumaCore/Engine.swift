@@ -958,6 +958,42 @@ public final class Engine {
         }
     }
 
+    public func shutdown() async {
+        guard !hasShutDown else { return }
+        hasShutDown = true
+
+        eventLogTask?.cancel()
+        eventLogTask = nil
+        deviceChangeWatcher?.cancel()
+        deviceChangeWatcher = nil
+        for task in deviceEventTasks.values { task.cancel() }
+        deviceEventTasks.removeAll()
+
+        #if canImport(Network) || canImport(CSoup)
+        for server in activeMCPServersByMissionID.values { server.stop() }
+        activeMCPServersByMissionID.removeAll()
+        externalMCPServer?.stop()
+        externalMCPServer = nil
+        externalMCPURL = nil
+        externalMCPMissionID = nil
+        #endif
+
+        sessionsObservation = nil
+        notebookObservation = nil
+        instrumentsObservation = nil
+        insightsObservation = nil
+        tracesObservation = nil
+        missionsObservation = nil
+        packagesObservation = nil
+
+        for node in processNodes { node.stop() }
+        processNodes.removeAll()
+
+        await collaboration.stop()
+    }
+
+    @ObservationIgnored private var hasShutDown = false
+
     public func clearEventLog() {
         eventLog.clear()
         if let eventStore {

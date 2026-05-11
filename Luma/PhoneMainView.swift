@@ -160,8 +160,9 @@ private struct PhoneContentView: View {
             LumaAppState.shared.lastDocumentPath = projectURL.path
         }
         .onDisappear {
+            let url = projectURL
             Task { @MainActor in
-                await engine.collaboration.stop()
+                await EngineRegistry.shared.release(workingProjectURL: url)
             }
         }
         .onOpenURL { url in
