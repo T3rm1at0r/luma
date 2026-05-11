@@ -7,6 +7,11 @@ final class InstrumentUIRegistry {
 
     private var uis: [String: InstrumentUI] = [:]
 
+    func registerGlobalDefaults() {
+        register(for: "tracer", ui: TracerUI())
+        register(for: "codeshare", ui: CodeShareUI())
+    }
+
     func register(for descriptorID: String, ui: InstrumentUI) {
         uis[descriptorID] = ui
     }

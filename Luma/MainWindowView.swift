@@ -3,60 +3,76 @@ import SwiftUI
 import LumaCore
 
 struct MainWindowView: View {
-    @StateObject private var workspace: Workspace
-
     private let projectURL: URL
     private let fileURL: URL?
     private let project: Binding<LumaProject>?
+
+    @State private var engineResult: Result<Engine, any Swift.Error>
+    @State private var picker = TargetPicker()
+    @State private var collapsedEventBaselineVersion: Int = 0
+    @State private var collapsedNewEvents: Int = 0
+    @State private var isShowingHostingBlockedAlert = false
 
     init(projectURL: URL, fileURL: URL? = nil, project: Binding<LumaProject>? = nil) {
         self.projectURL = projectURL
         self.fileURL = fileURL
         self.project = project
+        let result: Result<Engine, any Swift.Error>
+        do {
+            let engine = try EngineRegistry.shared.engine(
+                for: projectURL,
+                dataDirectory: LumaAppPaths.shared.dataDirectory,
+                gitHubAuth: sharedGitHubAuth()
+            )
+            result = .success(engine)
+        } catch {
+            result = .failure(error)
+        }
+        self._engineResult = State(initialValue: result)
+    }
 
-        let fm = FileManager.default
-        let dbURL = projectURL.appendingPathComponent("db.sqlite")
-        let tracesURL = projectURL.appendingPathComponent("traces", isDirectory: true)
-        let eventsURL = projectURL.appendingPathComponent("events", isDirectory: true)
-        try? fm.createDirectory(at: projectURL, withIntermediateDirectories: true)
-        try? fm.createDirectory(at: tracesURL, withIntermediateDirectories: true)
-
-        let store = try! ProjectStore(path: dbURL.path)
-        let traces = try! TraceStore(directory: tracesURL)
-        let eventStore = try? EventStore(directory: eventsURL)
-        self._workspace = StateObject(
-            wrappedValue: Workspace(store: store, traces: traces, eventStore: eventStore, gitHubAuth: sharedGitHubAuth())
-        )
+    var body: some View {
+        switch engineResult {
+        case .success(let engine):
+            ProjectContentView(
+                engine: engine,
+                picker: picker,
+                projectURL: projectURL,
+                project: project,
+                restorationPath: restorationPath,
+                collapsedEventBaselineVersion: $collapsedEventBaselineVersion,
+                collapsedNewEvents: $collapsedNewEvents,
+                isShowingHostingBlockedAlert: $isShowingHostingBlockedAlert
+            )
+        case .failure(let error):
+            VStack(spacing: 12) {
+                Text("Failed to open project")
+                    .font(.title3)
+                Text(error.localizedDescription)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+            .frame(minWidth: 480, minHeight: 240)
+        }
     }
 
     private var restorationPath: String {
         (fileURL ?? projectURL).path
     }
+}
 
-    @State private var collapsedEventBaselineVersion: Int = 0
-    @State private var collapsedNewEvents: Int = 0
-    @State private var isShowingHostingBlockedAlert = false
+private struct ProjectContentView: View {
+    let engine: Engine
+    let picker: TargetPicker
+    let projectURL: URL
+    let project: Binding<LumaProject>?
+    let restorationPath: String
 
-    private var selection: Binding<SidebarItemID?> {
-        Binding(
-            get: { workspace.selectedSidebarItem },
-            set: { workspace.selectedSidebarItem = $0 }
-        )
-    }
-
-    private var isEventStreamCollapsed: Binding<Bool> {
-        Binding(
-            get: { workspace.projectUIState.isEventStreamCollapsed },
-            set: { workspace.setEventStreamCollapsed($0) }
-        )
-    }
-
-    private var eventStreamBottomHeight: Binding<Double> {
-        Binding(
-            get: { workspace.projectUIState.eventStreamBottomHeight },
-            set: { workspace.setEventStreamBottomHeight($0) }
-        )
-    }
+    @Binding var collapsedEventBaselineVersion: Int
+    @Binding var collapsedNewEvents: Int
+    @Binding var isShowingHostingBlockedAlert: Bool
 
     var body: some View {
         CollapsibleVSplitView(
@@ -69,8 +85,9 @@ struct MainWindowView: View {
         }
         .toolbarRole(.editor)
         .toolbar {
-            WorkspaceToolbar(
-                workspace: workspace,
+            ProjectToolbar(
+                engine: engine,
+                picker: picker,
                 selection: selection,
                 isShowingHostingBlockedAlert: $isShowingHostingBlockedAlert
             )
@@ -92,10 +109,18 @@ struct MainWindowView: View {
             maxHeight: .infinity,
             alignment: .topLeading
         )
+        .environment(picker)
         .task {
-            await workspace.configurePersistence()
-            if workspace.selectedSidebarItem == nil, !workspace.engine.notebookEntries.isEmpty {
-                workspace.selectedSidebarItem = .notebook
+            await EngineRegistry.shared.startIfNeeded(for: projectURL)
+            engine.attachInstrumentUIs()
+            #if os(macOS)
+                engine.attachLocalNotifier()
+            #endif
+            if engine.collaboration.isCollaborative {
+                engine.setCollaborationPanelVisible(true)
+            }
+            if engine.selectedSidebarItem == nil, !engine.notebookEntries.isEmpty {
+                engine.selectedSidebarItem = .notebook
             }
         }
         .onChange(of: restorationPath, initial: true) { _, newPath in
@@ -103,18 +128,18 @@ struct MainWindowView: View {
         }
         .onDisappear {
             Task { @MainActor in
-                await workspace.engine.collaboration.stop()
+                await engine.collaboration.stop()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ProjectStore.didCommitNotification)) { note in
             guard
                 let id = note.userInfo?["instanceID"] as? UUID,
-                id == workspace.store.instanceID
+                id == engine.store.instanceID
             else { return }
             project?.wrappedValue.revision &+= 1
         }
-        .onChange(of: workspace.engine.eventLog.totalReceived) { _, newVersion in
-            if workspace.projectUIState.isEventStreamCollapsed {
+        .onChange(of: engine.eventLog.totalReceived) { _, newVersion in
+            if engine.projectUIState.isEventStreamCollapsed {
                 let delta = max(0, newVersion - collapsedEventBaselineVersion)
                 collapsedNewEvents += delta
                 collapsedEventBaselineVersion = newVersion
@@ -123,12 +148,33 @@ struct MainWindowView: View {
                 collapsedNewEvents = 0
             }
         }
-        .onChange(of: workspace.projectUIState.isEventStreamCollapsed) { _, isCollapsed in
-            collapsedEventBaselineVersion = workspace.engine.eventLog.totalReceived
+        .onChange(of: engine.projectUIState.isEventStreamCollapsed) { _, isCollapsed in
+            collapsedEventBaselineVersion = engine.eventLog.totalReceived
             if !isCollapsed {
                 collapsedNewEvents = 0
             }
         }
+    }
+
+    private var isEventStreamCollapsed: Binding<Bool> {
+        Binding(
+            get: { engine.projectUIState.isEventStreamCollapsed },
+            set: { engine.setEventStreamCollapsed($0) }
+        )
+    }
+
+    private var eventStreamBottomHeight: Binding<Double> {
+        Binding(
+            get: { engine.projectUIState.eventStreamBottomHeight },
+            set: { engine.setEventStreamBottomHeight($0) }
+        )
+    }
+
+    private var selection: Binding<SidebarItemID?> {
+        Binding(
+            get: { engine.selectedSidebarItem },
+            set: { engine.selectedSidebarItem = $0 }
+        )
     }
 
     private var mainContent: some View {
@@ -137,8 +183,8 @@ struct MainWindowView: View {
                 navigationAndDetail
                     .frame(minWidth: 560)
 
-                if workspace.isCollaborationPanelVisible {
-                    CollaborationPanel(workspace: workspace)
+                if engine.projectUIState.isCollaborationPanelVisible {
+                    CollaborationPanel(engine: engine)
                         .frame(minWidth: 260, idealWidth: 300, maxWidth: 520)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -147,9 +193,9 @@ struct MainWindowView: View {
             HStack(spacing: 0) {
                 navigationAndDetail
 
-                if workspace.isCollaborationPanelVisible {
+                if engine.projectUIState.isCollaborationPanelVisible {
                     Divider()
-                    CollaborationPanel(workspace: workspace)
+                    CollaborationPanel(engine: engine)
                         .frame(minWidth: 260, idealWidth: 300, maxWidth: 520)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -160,27 +206,27 @@ struct MainWindowView: View {
     private var navigationAndDetail: some View {
         NavigationSplitView {
             SidebarView(
-                workspace: workspace,
+                engine: engine,
                 selection: selection
             )
             .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
         } detail: {
             DetailView(
-                workspace: workspace,
+                engine: engine,
                 selection: selection
             )
         }
         .sheet(
             item: Binding(
-                get: { workspace.targetPickerContext },
+                get: { picker.context },
                 set: { newValue in
                     Task { @MainActor in
-                        workspace.targetPickerContext = newValue
+                        picker.context = newValue
                     }
                 }
             ),
             onDismiss: {
-                workspace.targetPickerContext = nil
+                picker.context = nil
             },
             content: { context in
                 targetPickerSheet(context: context)
@@ -190,7 +236,7 @@ struct MainWindowView: View {
 
     private func targetPickerSheet(context: TargetPickerContext) -> some View {
         TargetPickerView(
-            deviceManager: workspace.deviceManager,
+            deviceManager: engine.deviceManager,
             reason: {
                 if case .reestablish(_, let reason) = context {
                     reason
@@ -213,10 +259,10 @@ struct MainWindowView: View {
                 processName: config.defaultDisplayName,
                 lastKnownPID: 0
             )
-            try? workspace.store.save(sessionRecord)
-            workspace.selectedSidebarItem = .session(sessionRecord.id)
+            try? engine.store.save(sessionRecord)
+            engine.selectedSidebarItem = .session(sessionRecord.id)
 
-            _ = try? await workspace.engine.spawnAndAttach(
+            _ = try? await engine.spawnAndAttach(
                 device: device,
                 session: sessionRecord
             )
@@ -225,28 +271,28 @@ struct MainWindowView: View {
 
     private func handleArm(device: Device, config: SpawnConfig, regex: String) {
         Task { @MainActor in
-            let session = await workspace.engine.armNewSession(
+            let session = await engine.armNewSession(
                 device: device,
                 config: config,
                 matchPattern: regex
             )
-            workspace.selectedSidebarItem = .session(session.id)
+            engine.selectedSidebarItem = .session(session.id)
         }
     }
 
     private func handleAttach(device: Device, proc: ProcessDetails) {
-        let targetPickerContext = workspace.targetPickerContext
+        let pickerContext = picker.context
 
         Task { @MainActor in
-            if let existingNode = workspace.engine.processNodes.first(where: {
+            if let existingNode = engine.processNodes.first(where: {
                 $0.deviceID == device.id && $0.pid == proc.pid
             }) {
-                workspace.selectedSidebarItem = .session(workspace.engine.sessionID(for: existingNode))
+                engine.selectedSidebarItem = .session(engine.sessionID(for: existingNode))
                 return
             }
 
             let reusedFromReestablish: LumaCore.ProcessSession? =
-                if case .reestablish(let session, _) = targetPickerContext { session } else { nil }
+                if case .reestablish(let session, _) = pickerContext { session } else { nil }
 
             var sessionRecord: LumaCore.ProcessSession
 
@@ -269,10 +315,10 @@ struct MainWindowView: View {
 
             sessionRecord.adoptIcon(from: proc)
 
-            try? workspace.store.save(sessionRecord)
-            workspace.selectedSidebarItem = .session(sessionRecord.id)
+            try? engine.store.save(sessionRecord)
+            engine.selectedSidebarItem = .session(sessionRecord.id)
 
-            _ = try? await workspace.engine.attach(
+            _ = try? await engine.attach(
                 device: device,
                 process: proc,
                 session: sessionRecord
@@ -283,26 +329,26 @@ struct MainWindowView: View {
     private var eventStreamArea: some View {
         ZStack(alignment: .bottomLeading) {
             EventStreamView(
-                workspace: workspace,
+                engine: engine,
                 selection: selection,
                 onCollapseRequested: {
-                    workspace.setEventStreamCollapsed(true)
+                    engine.setEventStreamCollapsed(true)
                 }
             )
-            .opacity(workspace.projectUIState.isEventStreamCollapsed ? 0 : 1)
+            .opacity(engine.projectUIState.isEventStreamCollapsed ? 0 : 1)
             .clipped()
 
             collapsedEventStreamBar
-                .opacity(workspace.projectUIState.isEventStreamCollapsed ? 1 : 0)
+                .opacity(engine.projectUIState.isEventStreamCollapsed ? 1 : 0)
         }
     }
 
     private var collapsedEventStreamBar: some View {
         HStack {
             Button {
-                workspace.setEventStreamCollapsed(false)
+                engine.setEventStreamCollapsed(false)
                 collapsedNewEvents = 0
-                collapsedEventBaselineVersion = workspace.engine.eventLog.totalReceived
+                collapsedEventBaselineVersion = engine.eventLog.totalReceived
             } label: {
                 if collapsedNewEvents > 0 {
                     Label(
@@ -329,8 +375,9 @@ struct MainWindowView: View {
     }
 }
 
-struct WorkspaceToolbar: ToolbarContent {
-    @ObservedObject var workspace: Workspace
+struct ProjectToolbar: ToolbarContent {
+    let engine: Engine
+    let picker: TargetPicker
     @Binding var selection: SidebarItemID?
     @Binding var isShowingHostingBlockedAlert: Bool
 
@@ -339,44 +386,11 @@ struct WorkspaceToolbar: ToolbarContent {
     @State private var pendingCodeShareAfterAddInstrumentDismiss: LumaCore.ProcessSession?
     @State private var isShowingPackageManager = false
 
-    var selectedProcessSession: LumaCore.ProcessSession? {
-        guard let id = selection else { return nil }
-
-        switch id {
-        case .notebook, .missions, .mission(_), .package(_), .customInstrumentDef(_):
-            return nil
-
-        case .session(let sessionID),
-            .repl(let sessionID),
-            .instrument(let sessionID, _),
-            .instrumentComponent(let sessionID, _, _, _),
-            .insight(let sessionID, _),
-            .itrace(let sessionID, _):
-            return workspace.engine.session(id: sessionID)
-        }
-    }
-
-    var selectedProcessNode: LumaCore.ProcessNode? {
-        guard let id = selection else { return nil }
-
-        switch id {
-        case .notebook, .missions, .mission(_), .package(_), .customInstrumentDef(_):
-            return nil
-        case .session(let sessionID),
-            .repl(let sessionID),
-            .instrument(let sessionID, _),
-            .instrumentComponent(let sessionID, _, _, _),
-            .insight(let sessionID, _),
-            .itrace(let sessionID, _):
-            return workspace.engine.node(forSessionID: sessionID)
-        }
-    }
-
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
-                if workspace.engine.canHostNewSessions {
-                    workspace.targetPickerContext = .newSession
+                if engine.canHostNewSessions {
+                    picker.context = .newSession
                 } else {
                     isShowingHostingBlockedAlert = true
                 }
@@ -406,7 +420,7 @@ struct WorkspaceToolbar: ToolbarContent {
             ) { session in
                 AddInstrumentSheet(
                     session: session,
-                    workspace: workspace,
+                    engine: engine,
                     selection: $selection,
                     onInstrumentAdded: { instrument in
                         selection = .instrument(session.id, instrument.id)
@@ -419,7 +433,7 @@ struct WorkspaceToolbar: ToolbarContent {
             .sheet(item: $showingCodeShareSheetForProcess) { session in
                 CodeShareBrowserView(
                     session: session,
-                    workspace: workspace,
+                    engine: engine,
                     onInstrumentAdded: { instrument in
                         showingCodeShareSheetForProcess = nil
                         selection = .instrument(session.id, instrument.id)
@@ -433,7 +447,7 @@ struct WorkspaceToolbar: ToolbarContent {
             {
                 Button {
                     Task { @MainActor in
-                        await workspace.engine.resumeSpawnedProcess(node: node)
+                        await engine.resumeSpawnedProcess(node: node)
                     }
                 } label: {
                     Label("Resume Process", systemImage: "play.fill")
@@ -455,23 +469,56 @@ struct WorkspaceToolbar: ToolbarContent {
                         .bold()
                         .padding(.bottom, 8)
 
-                    PackageSearchView(workspace: workspace, selection: $selection)
+                    PackageSearchView(engine: engine, selection: $selection)
                 }
                 .padding()
             }
 
             Button {
-                workspace.isCollaborationPanelVisible.toggle()
+                engine.setCollaborationPanelVisible(!engine.projectUIState.isCollaborationPanelVisible)
             } label: {
                 Label(
                     "Collaboration",
-                    systemImage: workspace.isCollaborationPanelVisible
+                    systemImage: engine.projectUIState.isCollaborationPanelVisible
                         ? "person.2.wave.2.fill"
                         : "person.2.wave.2"
                 )
             }
             .help("Show or hide the collaboration panel")
             .keyboardShortcut("c", modifiers: [.command, .option])
+        }
+    }
+
+    var selectedProcessSession: LumaCore.ProcessSession? {
+        guard let id = selection else { return nil }
+
+        switch id {
+        case .notebook, .missions, .mission(_), .package(_), .customInstrumentDef(_):
+            return nil
+
+        case .session(let sessionID),
+            .repl(let sessionID),
+            .instrument(let sessionID, _),
+            .instrumentComponent(let sessionID, _, _, _),
+            .insight(let sessionID, _),
+            .itrace(let sessionID, _):
+            return engine.session(id: sessionID)
+        }
+    }
+
+    var selectedProcessNode: LumaCore.ProcessNode? {
+        guard let id = selection else { return nil }
+
+        switch id {
+        case .notebook, .missions, .mission(_), .package(_), .customInstrumentDef(_):
+            return nil
+        case .session(let sessionID),
+            .repl(let sessionID),
+            .instrument(let sessionID, _),
+            .instrumentComponent(let sessionID, _, _, _),
+            .insight(let sessionID, _),
+            .itrace(let sessionID, _):
+            return engine.node(forSessionID: sessionID)
         }
     }
 }

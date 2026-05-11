@@ -2,7 +2,7 @@ import LumaCore
 import SwiftUI
 
 struct ActionQueueView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let missionID: UUID
     let actions: [MissionAction]
 
@@ -38,12 +38,12 @@ struct ActionQueueView: View {
                         ForEach(actions) { action in
                             if action.toolName == MissionTools.requestUserInputToolName {
                                 RequestUserInputCard(action: action) { answer in
-                                    workspace.engine.submitUserInputResponse(actionID: action.id, answer: answer)
+                                    engine.submitUserInputResponse(actionID: action.id, answer: answer)
                                 }
                             } else {
                                 ActionCard(
                                     action: action,
-                                    onApprove: { Task { await workspace.engine.approveMissionAction(actionID: action.id) } },
+                                    onApprove: { Task { await engine.approveMissionAction(actionID: action.id) } },
                                     onReject: {
                                         rejectingAction = action
                                         rejectReason = ""
@@ -66,7 +66,7 @@ struct ActionQueueView: View {
             Button("Reject", role: .destructive) {
                 if let a = rejectingAction {
                     let reason = rejectReason.isEmpty ? nil : rejectReason
-                    Task { await workspace.engine.rejectMissionAction(actionID: a.id, reason: reason) }
+                    Task { await engine.rejectMissionAction(actionID: a.id, reason: reason) }
                 }
                 rejectingAction = nil
             }

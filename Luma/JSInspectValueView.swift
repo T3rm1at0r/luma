@@ -6,7 +6,7 @@ struct JSInspectValueView: View {
     let value: JSInspectValue
 
     let sessionID: UUID
-    let workspace: Workspace
+    let engine: Engine
     let selection: Binding<SidebarItemID?>
 
     private let circularTargets: Set<Int>
@@ -16,13 +16,13 @@ struct JSInspectValueView: View {
     init(
         value: JSInspectValue,
         sessionID: UUID,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) {
         self.value = value
 
         self.sessionID = sessionID
-        self.workspace = workspace
+        self.engine = engine
         self.selection = selection
 
         self.circularTargets = JSInspectValueView.collectCircularTargets(in: value)
@@ -33,7 +33,7 @@ struct JSInspectValueView: View {
             value: value,
             isRoot: true,
             sessionID: sessionID,
-            workspace: workspace,
+            engine: engine,
             selection: selection
         )
         .environment(\.circularTargets, circularTargets)
@@ -78,7 +78,7 @@ private struct JSInspectNodeView: View {
     let isRoot: Bool
 
     let sessionID: UUID
-    let workspace: Workspace
+    let engine: Engine
     let selection: Binding<SidebarItemID?>
 
     @State private var isExpanded: Bool = true
@@ -122,7 +122,7 @@ private struct JSInspectNodeView: View {
                                 value: prop.value,
                                 isRoot: false,
                                 sessionID: sessionID,
-                                workspace: workspace,
+                                engine: engine,
                                 selection: selection
                             )
                         }
@@ -173,7 +173,7 @@ private struct JSInspectNodeView: View {
                                 value: elements[idx],
                                 isRoot: false,
                                 sessionID: sessionID,
-                                workspace: workspace,
+                                engine: engine,
                                 selection: selection
                             )
                         }
@@ -209,7 +209,7 @@ private struct JSInspectNodeView: View {
                                 value: entry.key,
                                 isRoot: false,
                                 sessionID: sessionID,
-                                workspace: workspace,
+                                engine: engine,
                                 selection: selection
                             )
                             .foregroundStyle(.green)
@@ -221,7 +221,7 @@ private struct JSInspectNodeView: View {
                                 value: entry.value,
                                 isRoot: false,
                                 sessionID: sessionID,
-                                workspace: workspace,
+                                engine: engine,
                                 selection: selection
                             )
                         }
@@ -259,7 +259,7 @@ private struct JSInspectNodeView: View {
                                 value: elements[idx],
                                 isRoot: false,
                                 sessionID: sessionID,
-                                workspace: workspace,
+                                engine: engine,
                                 selection: selection
                             )
                         }
@@ -304,7 +304,7 @@ private struct JSInspectNodeView: View {
                         Button {
                             Task { @MainActor in
                                 do {
-                                    let insight = try workspace.engine.getOrCreateInsight(
+                                    let insight = try engine.getOrCreateInsight(
                                         sessionID: sessionID,
                                         pointer: addr,
                                         kind: .memory
@@ -321,7 +321,7 @@ private struct JSInspectNodeView: View {
                         Button {
                             Task { @MainActor in
                                 do {
-                                    let insight = try workspace.engine.getOrCreateInsight(
+                                    let insight = try engine.getOrCreateInsight(
                                         sessionID: sessionID,
                                         pointer: addr,
                                         kind: .disassembly

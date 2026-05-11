@@ -4,7 +4,7 @@ import LumaCore
 struct HookPackConfigView: View {
     let pack: HookPack
     @Binding var config: HookPackConfig
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -36,7 +36,7 @@ struct HookPackConfigView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            InstrumentWidgetsRenderer(widgets: pack.manifest.widgets, workspace: workspace)
+            InstrumentWidgetsRenderer(widgets: pack.manifest.widgets, engine: engine)
 
             Spacer()
         }

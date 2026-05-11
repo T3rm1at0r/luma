@@ -4,7 +4,7 @@ import SwiftUI
 struct ThreadDetailView: View {
     let sessionID: UUID
     let thread: LumaCore.ProcessThread
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var snapshot: LumaCore.ThreadSnapshot?
@@ -44,14 +44,14 @@ struct ThreadDetailView: View {
             .buttonStyle(.borderless)
             .disabled(isLoading)
 
-            let actions = workspace.engine.threadActions(sessionID: sessionID, thread: thread)
+            let actions = engine.threadActions(sessionID: sessionID, thread: thread)
             if !actions.isEmpty {
                 Menu {
                     ForEach(actions) { action in
                         Button(role: action.role == .destructive ? .destructive : nil) {
                             Task { @MainActor in
                                 if let target = await action.perform() {
-                                    selection = workspace.sidebarItem(for: target)
+                                    selection = SidebarItemID(navigationTarget: target)
                                 }
                             }
                         } label: {
@@ -124,7 +124,7 @@ struct ThreadDetailView: View {
                     } label: {
                         Label("Open Disassembly", systemImage: "hammer")
                     }
-                    let actions = workspace.engine.addressActions(
+                    let actions = engine.addressActions(
                         sessionID: sessionID,
                         address: address,
                         context: AddressContext(kind: registerKind(reg))
@@ -135,7 +135,7 @@ struct ThreadDetailView: View {
                             Button(role: action.role == .destructive ? .destructive : nil) {
                                 Task { @MainActor in
                                     if let target = await action.perform() {
-                                        selection = workspace.sidebarItem(for: target)
+                                        selection = SidebarItemID(navigationTarget: target)
                                     }
                                 }
                             } label: {
@@ -165,7 +165,7 @@ struct ThreadDetailView: View {
     private func openInsight(at address: UInt64, kind: LumaCore.AddressInsight.Kind) {
         Task { @MainActor in
             do {
-                let insight = try workspace.engine.getOrCreateInsight(
+                let insight = try engine.getOrCreateInsight(
                     sessionID: sessionID,
                     pointer: address,
                     kind: kind
@@ -178,7 +178,7 @@ struct ThreadDetailView: View {
     }
 
     private func reload() async {
-        guard let node = workspace.engine.node(forSessionID: sessionID) else {
+        guard let node = engine.node(forSessionID: sessionID) else {
             loadError = "Process is detached."
             return
         }

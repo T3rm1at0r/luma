@@ -71,6 +71,8 @@ public final class Engine {
     public private(set) var instrumentsBySession: [UUID: [InstrumentInstance]] = [:]
     public private(set) var insightsBySession: [UUID: [AddressInsight]] = [:]
     public private(set) var tracesBySession: [UUID: [ITrace]] = [:]
+    public internal(set) var projectUIState: ProjectUIState = ProjectUIState()
+    public internal(set) var sessionUIStates: [UUID: SessionUIState] = [:]
     public private(set) var missions: [Mission] = []
     public private(set) var installedPackages: [InstalledPackage] = []
     public private(set) var editorFSSnapshot: EditorFSSnapshot?
@@ -922,6 +924,8 @@ public final class Engine {
         }
         notebookEntries = (try? store.fetchNotebookEntries()) ?? []
         sessions = (try? store.fetchSessions()) ?? []
+        projectUIState = (try? store.fetchProjectUIState()) ?? ProjectUIState()
+        sessionUIStates = (try? store.fetchAllSessionUIStates()) ?? [:]
 
         sessionsObservation = store.observeSessions { [weak self] sessions in
             Task { @MainActor in
@@ -1643,6 +1647,18 @@ public final class Engine {
 
     public func session(forNode node: ProcessNode) -> ProcessSession? {
         session(id: node.sessionID)
+    }
+
+    public func processNode(forEvent event: RuntimeEvent) -> ProcessNode? {
+        guard let sessionID = event.sessionID else { return nil }
+        return node(forSessionID: sessionID)
+    }
+
+    public func instrument(forEvent event: RuntimeEvent) -> InstrumentInstance? {
+        guard case .instrument(let id, _) = event.source,
+              let sessionID = event.sessionID
+        else { return nil }
+        return instrument(id: id, sessionID: sessionID)
     }
 
     public func driver(forSessionID id: UUID) -> CollaborationSession.UserInfo? {

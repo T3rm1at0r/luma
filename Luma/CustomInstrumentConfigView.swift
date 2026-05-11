@@ -4,11 +4,11 @@ import SwiftUI
 struct CustomInstrumentConfigView: View {
     let defID: UUID
     @Binding var config: CustomInstrumentConfig
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     private var def: CustomInstrumentDef? {
-        workspace.engine.customInstruments.def(withId: defID)
+        engine.customInstruments.def(withId: defID)
     }
 
     var body: some View {
@@ -38,7 +38,7 @@ struct CustomInstrumentConfigView: View {
             }
 
             if let def {
-                InstrumentWidgetsRenderer(widgets: def.widgets, workspace: workspace)
+                InstrumentWidgetsRenderer(widgets: def.widgets, engine: engine)
             }
 
             Spacer()

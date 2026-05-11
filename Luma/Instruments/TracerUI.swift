@@ -4,7 +4,7 @@ import LumaCore
 struct TracerUI: InstrumentUI {
     func makeConfigEditor(
         configJSON: Binding<Data>,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) -> AnyView {
         let configBinding = Binding<TracerConfig>(
@@ -19,7 +19,7 @@ struct TracerUI: InstrumentUI {
         return AnyView(
             TracerConfigView(
                 config: configBinding,
-                workspace: workspace,
+                engine: engine,
                 selection: selection
             )
         )
@@ -27,7 +27,7 @@ struct TracerUI: InstrumentUI {
 
     func renderEvent(
         _ event: RuntimeEvent,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) -> AnyView {
         guard case .jsValue(let v) = event.payload,
@@ -55,7 +55,7 @@ struct TracerUI: InstrumentUI {
                     JSInspectValueView(
                         value: ev.message,
                         sessionID: event.sessionID ?? UUID(),
-                        workspace: workspace,
+                        engine: engine,
                         selection: selection
                     )
                     .font(.system(.footnote, design: .monospaced))
@@ -66,9 +66,9 @@ struct TracerUI: InstrumentUI {
         return AnyView(
             TracerEventRowView(
                 messageView: messageView,
-                process: workspace.processNode(for: event),
+                process: engine.processNode(forEvent: event),
                 backtrace: ev.backtrace,
-                workspace: workspace,
+                engine: engine,
                 selection: selection
             )
         )
@@ -76,7 +76,7 @@ struct TracerUI: InstrumentUI {
 
     func makeEventContextMenuItems(
         _ event: RuntimeEvent,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) -> [InstrumentEventMenuItem] {
         guard case .instrument(let instrumentID, _) = event.source,

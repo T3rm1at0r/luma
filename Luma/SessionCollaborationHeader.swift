@@ -3,7 +3,9 @@ import SwiftUI
 
 struct SessionCollaborationHeader: View {
     let sessionID: UUID
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
+
+    @Environment(TargetPicker.self) private var picker
 
     var body: some View {
         if host != nil || driver != nil {
@@ -32,7 +34,7 @@ struct SessionCollaborationHeader: View {
 
                 Spacer()
 
-                if host != nil, workspace.engine.collaboration.isOwner {
+                if host != nil, engine.collaboration.isOwner {
                     Button("Run on My Device…") {
                         rehost()
                     }
@@ -40,9 +42,9 @@ struct SessionCollaborationHeader: View {
                     .controlSize(.small)
                 }
 
-                if !localUserIsDriver, workspace.engine.collaboration.isOwner {
+                if !localUserIsDriver, engine.collaboration.isOwner {
                     Button("Take the wheel") {
-                        workspace.engine.collaboration.enqueueClaimDriver(sessionID: sessionID)
+                        engine.collaboration.enqueueClaimDriver(sessionID: sessionID)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -55,27 +57,27 @@ struct SessionCollaborationHeader: View {
     }
 
     private var host: LumaCore.CollaborationSession.UserInfo? {
-        guard let session = workspace.engine.sessions.first(where: { $0.id == sessionID }),
+        guard let session = engine.sessions.first(where: { $0.id == sessionID }),
               let host = session.host,
-              host.id != workspace.engine.collaboration.localUser?.id
+              host.id != engine.collaboration.localUser?.id
         else { return nil }
         return host
     }
 
     private var driver: LumaCore.CollaborationSession.UserInfo? {
         guard !localUserIsDriver else { return nil }
-        return workspace.engine.driver(forSessionID: sessionID)
+        return engine.driver(forSessionID: sessionID)
     }
 
     private var localUserIsDriver: Bool {
-        workspace.engine.localUserIsDriver(ofSessionID: sessionID)
+        engine.localUserIsDriver(ofSessionID: sessionID)
     }
 
     private func rehost() {
         Task { @MainActor in
-            let result = await workspace.engine.reHost(sessionID: sessionID)
+            let result = await engine.reHost(sessionID: sessionID)
             if case .needsUserInput(let reason, let session) = result {
-                workspace.targetPickerContext = .reestablish(session: session, reason: reason)
+                picker.context = .reestablish(session: session, reason: reason)
             }
         }
     }

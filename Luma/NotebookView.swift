@@ -3,7 +3,7 @@ import LumaCore
 import SwiftUI
 
 struct NotebookView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     #if canImport(UIKit)
@@ -14,7 +14,7 @@ struct NotebookView: View {
     #endif
 
     private var entries: [LumaCore.NotebookEntry] {
-        workspace.engine.notebookEntries.sorted { a, b in
+        engine.notebookEntries.sorted { a, b in
             if a.position != b.position { return a.position < b.position }
             return a.id.uuidString < b.id.uuidString
         }
@@ -23,7 +23,7 @@ struct NotebookView: View {
     var body: some View {
         Group {
             if entries.isEmpty {
-                NotebookEmptyStateView(workspace: workspace, onAddNote: { addUserNote(after: nil) })
+                NotebookEmptyStateView(engine: engine, onAddNote: { addUserNote(after: nil) })
             } else {
                 content
             }
@@ -36,14 +36,14 @@ struct NotebookView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         let ordered = entries
-                        TopDropZone(workspace: workspace, firstEntry: ordered.first)
+                        TopDropZone(engine: engine, firstEntry: ordered.first)
                             .padding(.horizontal, horizontalInset)
                         ForEach(Array(ordered.enumerated()), id: \.element.id) { index, entry in
                             NotebookEntryRow(
                                 entry: entry,
                                 previous: index > 0 ? ordered[index - 1] : nil,
                                 next: index < ordered.count - 1 ? ordered[index + 1] : nil,
-                                workspace: workspace,
+                                engine: engine,
                                 selection: $selection,
                                 onEditingChanged: { editing in
                                     if editing {
@@ -55,7 +55,7 @@ struct NotebookView: View {
                             ) {
                                 addUserNote(after: entry)
                             } deleteAction: {
-                                workspace.engine.deleteNotebookEntry(entry)
+                                engine.deleteNotebookEntry(entry)
                             }
                             .id(entry.id)
                         }
@@ -114,7 +114,7 @@ struct NotebookView: View {
             binaryData: nil,
             processName: entry?.processName
         )
-        workspace.engine.addNotebookEntry(note, after: entry)
+        engine.addNotebookEntry(note, after: entry)
         lastInsertedID = note.id
     }
 }
@@ -124,7 +124,7 @@ struct NotebookView: View {
 /// row's frame; drops into the empty space above the first row used
 /// to fall on the floor.
 private struct TopDropZone: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let firstEntry: LumaCore.NotebookEntry?
     @State private var isTargeted = false
 
@@ -140,10 +140,10 @@ private struct TopDropZone: View {
             .dropDestination(for: String.self) { items, _ in
                 guard let first = items.first,
                       let sourceID = UUID(uuidString: first),
-                      let source = workspace.engine.notebookEntries.first(where: { $0.id == sourceID })
+                      let source = engine.notebookEntries.first(where: { $0.id == sourceID })
                 else { return false }
                 if source.id == firstEntry?.id { return false }
-                workspace.engine.reorderNotebookEntry(
+                engine.reorderNotebookEntry(
                     source,
                     between: nil,
                     and: firstEntry,
@@ -157,7 +157,7 @@ struct NotebookEntryRow: View {
     let entry: LumaCore.NotebookEntry
     let previous: LumaCore.NotebookEntry?
     let next: LumaCore.NotebookEntry?
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     let onEditingChanged: (Bool) -> Void
@@ -345,10 +345,10 @@ struct NotebookEntryRow: View {
             let sourceID = UUID(uuidString: first),
             sourceID != entry.id
         else { return false }
-        guard let source = workspace.engine.notebookEntries.first(where: { $0.id == sourceID })
+        guard let source = engine.notebookEntries.first(where: { $0.id == sourceID })
         else { return false }
 
-        let ordered = workspace.engine.notebookEntries.sorted { a, b in
+        let ordered = engine.notebookEntries.sorted { a, b in
             if a.position != b.position { return a.position < b.position }
             return a.id.uuidString < b.id.uuidString
         }
@@ -368,7 +368,7 @@ struct NotebookEntryRow: View {
         // Ignore no-op drags that would land back where the entry already is.
         if neighborA?.id == source.id || neighborB?.id == source.id { return false }
 
-        workspace.engine.reorderNotebookEntry(source, between: neighborA, and: neighborB)
+        engine.reorderNotebookEntry(source, between: neighborA, and: neighborB)
         return true
     }
 
@@ -426,7 +426,7 @@ struct NotebookEntryRow: View {
             JSInspectValueView(
                 value: jsValue,
                 sessionID: entry.sessionID ?? UUID(),
-                workspace: workspace,
+                engine: engine,
                 selection: $selection
             )
             .font(.system(.footnote, design: .monospaced))
@@ -444,12 +444,12 @@ struct NotebookEntryRow: View {
         withAnimation(.easeOut(duration: 0.15)) {
             isEditingUserNote = false
         }
-        workspace.engine.updateNotebookEntry(updated)
+        engine.updateNotebookEntry(updated)
     }
 
     private func cancelEdits() {
         if isFreshPlaceholder {
-            workspace.engine.deleteNotebookEntry(entry)
+            engine.deleteNotebookEntry(entry)
             return
         }
 
@@ -486,7 +486,7 @@ struct NotebookEntryRow: View {
 private let instructionsMaxWidth: CGFloat = 440
 
 struct NotebookEmptyStateView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let onAddNote: () -> Void
 
     #if canImport(UIKit)

@@ -4,7 +4,7 @@ import SwiftUI
 struct ModuleDetailView: View {
     let sessionID: UUID
     let module: LumaCore.ProcessModule
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var bundles: [LumaCore.ProcessModule.ID: LumaCore.ModuleSymbolBundle] = [:]
@@ -176,14 +176,14 @@ struct ModuleDetailView: View {
             Label("Open Memory", systemImage: "doc.text.magnifyingglass")
         }
 
-        let actions = workspace.engine.addressActions(sessionID: sessionID, address: address, context: context)
+        let actions = engine.addressActions(sessionID: sessionID, address: address, context: context)
         if !actions.isEmpty {
             Divider()
             ForEach(actions) { action in
                 Button(role: action.role == .destructive ? .destructive : nil) {
                     Task { @MainActor in
                         if let target = await action.perform() {
-                            selection = workspace.sidebarItem(for: target)
+                            selection = SidebarItemID(navigationTarget: target)
                         }
                     }
                 } label: {
@@ -214,7 +214,7 @@ struct ModuleDetailView: View {
 
         Task { @MainActor in
             do {
-                let insight = try workspace.engine.getOrCreateInsight(
+                let insight = try engine.getOrCreateInsight(
                     sessionID: sessionID,
                     pointer: address,
                     kind: kind
@@ -227,7 +227,7 @@ struct ModuleDetailView: View {
     }
 
     private func load(_ module: LumaCore.ProcessModule) async {
-        guard let node = workspace.engine.node(forSessionID: sessionID) else {
+        guard let node = engine.node(forSessionID: sessionID) else {
             loadErrors[module.id] = "Process is detached."
             return
         }

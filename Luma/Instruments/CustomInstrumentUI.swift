@@ -6,7 +6,7 @@ struct CustomInstrumentUI: InstrumentUI {
 
     func makeConfigEditor(
         configJSON: Binding<Data>,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) -> AnyView {
         let id = defID
@@ -23,7 +23,7 @@ struct CustomInstrumentUI: InstrumentUI {
             CustomInstrumentConfigView(
                 defID: id,
                 config: cfgBinding,
-                workspace: workspace,
+                engine: engine,
                 selection: selection
             )
         )
@@ -31,7 +31,7 @@ struct CustomInstrumentUI: InstrumentUI {
 
     func renderEvent(
         _ event: RuntimeEvent,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) -> AnyView {
         if case .jsValue(let v) = event.payload {
@@ -39,7 +39,7 @@ struct CustomInstrumentUI: InstrumentUI {
                 JSInspectValueView(
                     value: v,
                     sessionID: event.sessionID ?? UUID(),
-                    workspace: workspace,
+                    engine: engine,
                     selection: selection
                 )
                 .font(.system(.footnote, design: .monospaced))

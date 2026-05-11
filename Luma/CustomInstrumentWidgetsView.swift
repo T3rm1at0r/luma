@@ -3,7 +3,7 @@ import SwiftUI
 
 struct CustomInstrumentWidgetsPopover: View {
     let def: CustomInstrumentDef
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Environment(\.dismiss) private var dismiss
 
     @State private var draftWidgets: [InstrumentWidget] = []
@@ -159,7 +159,7 @@ struct CustomInstrumentWidgetsPopover: View {
         var updated = def
         updated.widgets = draftWidgets
         Task { @MainActor in
-            await workspace.engine.updateCustomInstrument(updated)
+            await engine.updateCustomInstrument(updated)
             dismiss()
         }
     }

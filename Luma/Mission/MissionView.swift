@@ -2,7 +2,7 @@ import LumaCore
 import SwiftUI
 
 struct MissionView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let missionID: UUID
     @Binding var selection: SidebarItemID?
 
@@ -15,7 +15,7 @@ struct MissionView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let mission {
-                MissionHeader(mission: mission, workspace: workspace)
+                MissionHeader(mission: mission, engine: engine)
                 Divider()
 
                 PlatformHSplit {
@@ -23,16 +23,16 @@ struct MissionView: View {
                         .frame(idealWidth: 480)
 
                     VStack(alignment: .leading, spacing: 0) {
-                        ActionQueueView(workspace: workspace, missionID: mission.id, actions: pendingActions)
+                        ActionQueueView(engine: engine, missionID: mission.id, actions: pendingActions)
                             .frame(maxHeight: 360)
                         Divider()
-                        FindingsListView(workspace: workspace, missionID: mission.id, findings: findings)
+                        FindingsListView(engine: engine, missionID: mission.id, findings: findings)
                     }
                     .frame(idealWidth: 280)
                 }
 
                 Divider()
-                MissionInputBar(workspace: workspace, mission: mission)
+                MissionInputBar(engine: engine, mission: mission)
             } else {
                 ContentUnavailableView("Mission not found", systemImage: "scope")
             }
@@ -48,7 +48,7 @@ struct MissionView: View {
     }
 
     private var mission: Mission? {
-        workspace.engine.missions.first(where: { $0.id == missionID })
+        engine.missions.first(where: { $0.id == missionID })
     }
 
     private var pendingActions: [MissionAction] {
@@ -59,21 +59,21 @@ struct MissionView: View {
         observations = []
         liveText = ""
 
-        turns = (try? workspace.store.fetchMissionTurns(missionID: missionID)) ?? []
-        actions = (try? workspace.store.fetchMissionActions(missionID: missionID)) ?? []
-        findings = (try? workspace.store.fetchMissionFindings(missionID: missionID)) ?? []
+        turns = (try? engine.store.fetchMissionTurns(missionID: missionID)) ?? []
+        actions = (try? engine.store.fetchMissionActions(missionID: missionID)) ?? []
+        findings = (try? engine.store.fetchMissionFindings(missionID: missionID)) ?? []
 
-        observations.append(workspace.store.observeMissionTurns(missionID: missionID) { rows in
+        observations.append(engine.store.observeMissionTurns(missionID: missionID) { rows in
             Task { @MainActor in turns = rows }
         })
-        observations.append(workspace.store.observeMissionActions(missionID: missionID) { rows in
+        observations.append(engine.store.observeMissionActions(missionID: missionID) { rows in
             Task { @MainActor in actions = rows }
         })
-        observations.append(workspace.store.observeMissionFindings(missionID: missionID) { rows in
+        observations.append(engine.store.observeMissionFindings(missionID: missionID) { rows in
             Task { @MainActor in findings = rows }
         })
 
-        workspace.engine.setMissionLiveDeltaSink { [missionID] eventMissionID, event in
+        engine.setMissionLiveDeltaSink { [missionID] eventMissionID, event in
             guard eventMissionID == missionID else { return }
             switch event {
             case .textDelta(let text):
@@ -89,7 +89,7 @@ struct MissionView: View {
 
 private struct MissionHeader: View {
     let mission: Mission
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -131,7 +131,7 @@ private struct MissionHeader: View {
 
             if mission.status.isLive {
                 Button(role: .destructive) {
-                    workspace.engine.cancelMission(missionID: mission.id)
+                    engine.cancelMission(missionID: mission.id)
                 } label: {
                     Label("Stop Mission", systemImage: "stop.circle")
                 }

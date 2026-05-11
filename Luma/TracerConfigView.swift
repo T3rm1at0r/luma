@@ -5,7 +5,7 @@ import LumaCore
 
 struct TracerConfigView: View {
     @Binding var config: TracerConfig
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @Environment(\.instrumentSession) private var instrumentSession
@@ -211,7 +211,7 @@ struct TracerConfigView: View {
 
     private var attachedNode: LumaCore.ProcessNode? {
         guard let session = instrumentSession else { return nil }
-        return workspace.engine.node(forSessionID: session.id)
+        return engine.node(forSessionID: session.id)
     }
 
     private var canResolve: Bool {
@@ -244,7 +244,7 @@ struct TracerConfigView: View {
             let session = instrumentSession,
             case .instrumentComponent(let sessionID, let instrumentID, let hookID, let navID) = newSelection,
             sessionID == session.id,
-            let thisInstrumentID = (try? workspace.store.fetchInstruments(sessionID: session.id))?.first(where: { $0.kind == .tracer })?.id,
+            let thisInstrumentID = (try? engine.store.fetchInstruments(sessionID: session.id))?.first(where: { $0.kind == .tracer })?.id,
             thisInstrumentID == instrumentID
         else {
             return
@@ -314,7 +314,7 @@ struct TracerConfigView: View {
                     draftCode: $draftCode,
                     isDirty: $isDirty,
                     selectedHook: selectedHook,
-                    workspace: workspace,
+                    engine: engine,
                 )
             } else {
                 Text("Select a hook to edit its script.")
@@ -348,7 +348,7 @@ struct TracerConfigView: View {
                         draftCode: $draftCode,
                         isDirty: $isDirty,
                         selectedHook: selectedHook,
-                        workspace: workspace,
+                        engine: engine,
                     )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -728,7 +728,7 @@ struct TracerConfigView: View {
 
     private func itraceCaptured(for hookID: UUID) -> Int {
         guard let session = instrumentSession else { return 0 }
-        let traces = workspace.engine.tracesBySession[session.id] ?? []
+        let traces = engine.tracesBySession[session.id] ?? []
         return traces.reduce(into: 0) { count, trace in
             if case .functionCall(let id, _) = trace.origin, id == hookID { count += 1 }
         }
@@ -873,7 +873,7 @@ struct TracerConfigView: View {
         Task {
             defer { installingPackage = nil }
             do {
-                _ = try await workspace.engine.installPackage(name: name, globalAlias: alias)
+                _ = try await engine.installPackage(name: name, globalAlias: alias)
                 await performSearch()
             } catch {
                 let classified = classify(error)
@@ -1055,14 +1055,14 @@ private struct HookEditorView: View {
     @Binding var draftCode: String
     @Binding var isDirty: Bool
     let selectedHook: TracerConfig.Hook?
-    var workspace: Workspace
+    let engine: Engine
 
     var body: some View {
-        let packages = (try? workspace.store.fetchPackagesState().packages) ?? []
+        let packages = (try? engine.store.fetchPackagesState().packages) ?? []
         CodeEditorView(
             text: $draftCode,
             profile: EditorProfile.fridaTracerHook(packages: packages),
-            workspace: workspace,
+            engine: engine,
         )
         .onChange(of: draftCode) { _, _ in
             isDirty = (draftCode != selectedHook?.code)

@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 struct AddInstrumentSheet: View {
     let session: LumaCore.ProcessSession
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
     let onInstrumentAdded: ((LumaCore.InstrumentInstance) -> Void)?
     let onBrowseCodeShare: () -> Void
@@ -27,7 +27,7 @@ struct AddInstrumentSheet: View {
     #endif
 
     var descriptors: [InstrumentDescriptor] {
-        workspace.engine.descriptors
+        engine.descriptors
     }
 
     private var builtinDescriptors: [InstrumentDescriptor] {
@@ -209,12 +209,12 @@ struct AddInstrumentSheet: View {
 
     @MainActor
     private func createNewCustomAndDismiss() async {
-        let def = workspace.engine.createCustomInstrument()
+        let def = engine.createCustomInstrument()
         let configJSON = CustomInstrumentConfig(
             defID: def.id,
             features: CustomInstrumentLibrary.initialFeatureStates(for: def)
         ).encode()
-        let added = await workspace.engine.addInstrument(
+        let added = await engine.addInstrument(
             kind: .custom,
             sourceIdentifier: def.id.uuidString,
             configJSON: configJSON,
@@ -260,13 +260,13 @@ struct AddInstrumentSheet: View {
         let started = folderURL.startAccessingSecurityScopedResource()
         defer { if started { folderURL.stopAccessingSecurityScopedResource() } }
         do {
-            let def = try workspace.engine.importCustomInstrumentFromHookPack(folderURL: folderURL)
+            let def = try engine.importCustomInstrumentFromHookPack(folderURL: folderURL)
             Task { @MainActor in
                 let configJSON = CustomInstrumentConfig(
                     defID: def.id,
                     features: CustomInstrumentLibrary.initialFeatureStates(for: def)
                 ).encode()
-                let added = await workspace.engine.addInstrument(
+                let added = await engine.addInstrument(
                     kind: .custom,
                     sourceIdentifier: def.id.uuidString,
                     configJSON: configJSON,
@@ -288,7 +288,7 @@ struct AddInstrumentSheet: View {
         if let ui = InstrumentUIRegistry.shared.ui(for: descriptor.id) {
             ui.makeConfigEditor(
                 configJSON: $initialConfigJSON,
-                workspace: workspace,
+                engine: engine,
                 selection: $selection
             )
             .environment(\.instrumentSession, session)
@@ -332,7 +332,7 @@ struct AddInstrumentSheet: View {
                         return
                     }
                     if let descriptor = selectedDescriptor {
-                        let newInstrument = await workspace.engine.addInstrument(
+                        let newInstrument = await engine.addInstrument(
                             kind: descriptor.kind,
                             sourceIdentifier: descriptor.sourceIdentifier,
                             configJSON: initialConfigJSON,

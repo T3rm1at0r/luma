@@ -6,11 +6,13 @@ import SwiftUI
 
 struct PhoneSessionView: View {
     let sessionID: UUID
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var path: [PhoneRoute]
     @Binding var activeDrawer: DrawerKind?
     let eventsIndicator: Bool
     let collabIndicator: Bool
+
+    @Environment(TargetPicker.self) private var picker
 
     @State private var segment: Segment = .repl
     @State private var isShowingAddInstrument = false
@@ -41,11 +43,11 @@ struct PhoneSessionView: View {
     }
 
     private var session: LumaCore.ProcessSession? {
-        workspace.engine.sessions.first { $0.id == sessionID }
+        engine.sessions.first { $0.id == sessionID }
     }
 
     private var node: LumaCore.ProcessNode? {
-        workspace.engine.node(forSessionID: sessionID)
+        engine.node(forSessionID: sessionID)
     }
 
     var body: some View {
@@ -67,14 +69,14 @@ struct PhoneSessionView: View {
                 resumeBanner(session: session, node: node)
             }
 
-            SessionContent(sessionID: sessionID, workspace: workspace) {
+            SessionContent(sessionID: sessionID, engine: engine) {
                 segmentBody
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $isShowingNotebook) {
-            PhoneNotebookSheet(workspace: workspace)
+            PhoneNotebookSheet(engine: engine)
         }
         .sheet(
             isPresented: $isShowingAddInstrument,
@@ -88,7 +90,7 @@ struct PhoneSessionView: View {
             if let session {
                 AddInstrumentSheet(
                     session: session,
-                    workspace: workspace,
+                    engine: engine,
                     selection: .constant(nil),
                     onInstrumentAdded: { _ in
                         isShowingAddInstrument = false
@@ -104,7 +106,7 @@ struct PhoneSessionView: View {
                 NavigationStack {
                     CodeShareBrowserView(
                         session: session,
-                        workspace: workspace,
+                        engine: engine,
                         onInstrumentAdded: { _ in
                             isShowingCodeShare = false
                         }
@@ -172,7 +174,7 @@ struct PhoneSessionView: View {
             .buttonStyle(.plain)
             .popover(isPresented: $isShowingSwitcher, arrowEdge: .top) {
                 PhoneSessionSwitcher(
-                    workspace: workspace,
+                    engine: engine,
                     current: sessionID,
                     onPick: { id in
                         isShowingSwitcher = false
@@ -183,8 +185,8 @@ struct PhoneSessionView: View {
                     },
                     onNew: {
                         isShowingSwitcher = false
-                        if workspace.engine.canHostNewSessions {
-                            workspace.targetPickerContext = .newSession
+                        if engine.canHostNewSessions {
+                            picker.context = .newSession
                         } else {
                             isShowingHostingBlockedAlert = true
                         }
@@ -264,7 +266,7 @@ struct PhoneSessionView: View {
         case .repl:
             REPLView(
                 sessionID: sessionID,
-                workspace: workspace,
+                engine: engine,
                 selection: $path.asSidebarSelection()
             )
 
@@ -281,7 +283,7 @@ struct PhoneSessionView: View {
 
     @ViewBuilder
     private var instrumentsList: some View {
-        let instruments = workspace.engine.instrumentsBySession[sessionID] ?? []
+        let instruments = engine.instrumentsBySession[sessionID] ?? []
         if instruments.isEmpty {
             segmentEmptyState(
                 icon: "waveform.path.ecg",
@@ -296,19 +298,19 @@ struct PhoneSessionView: View {
                     Button {
                         path.append(.instrument(sessionID, instance.id))
                     } label: {
-                        InstrumentRow(instance: instance, workspace: workspace)
+                        InstrumentRow(instance: instance, engine: engine)
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
-                            Task { await workspace.engine.removeInstrument(instance) }
+                            Task { await engine.removeInstrument(instance) }
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
                         Button {
                             let newState: LumaCore.InstrumentState = instance.state == .enabled ? .disabled : .enabled
                             Task {
-                                await workspace.engine.setInstrumentState(instance, state: newState)
+                                await engine.setInstrumentState(instance, state: newState)
                             }
                         } label: {
                             Label(
@@ -326,7 +328,7 @@ struct PhoneSessionView: View {
 
     @ViewBuilder
     private var insightsList: some View {
-        let insights = (workspace.engine.insightsBySession[sessionID] ?? [])
+        let insights = (engine.insightsBySession[sessionID] ?? [])
             .sorted { $0.createdAt < $1.createdAt }
         if insights.isEmpty {
             segmentEmptyState(
@@ -347,7 +349,7 @@ struct PhoneSessionView: View {
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
-                            try? workspace.store.deleteInsight(id: insight.id)
+                            try? engine.store.deleteInsight(id: insight.id)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -360,7 +362,7 @@ struct PhoneSessionView: View {
 
     @ViewBuilder
     private var tracesList: some View {
-        let traces = (workspace.engine.tracesBySession[sessionID] ?? [])
+        let traces = (engine.tracesBySession[sessionID] ?? [])
             .sorted { $0.startedAt < $1.startedAt }
         if traces.isEmpty {
             segmentEmptyState(
@@ -421,7 +423,7 @@ struct PhoneSessionView: View {
             Spacer()
             Button {
                 Task { @MainActor in
-                    await workspace.engine.resumeSpawnedProcess(node: node)
+                    await engine.resumeSpawnedProcess(node: node)
                 }
             } label: {
                 Label("Resume", systemImage: "play.fill")
@@ -436,31 +438,31 @@ struct PhoneSessionView: View {
 
     private func detach() {
         guard let node else { return }
-        workspace.engine.removeNode(node)
+        engine.removeNode(node)
     }
 
     private func killProcess() {
         guard let node, let session else { return }
         Task { @MainActor in
             do { try await node.kill() } catch {
-                workspace.engine.updateSession(id: session.id) { $0.lastError = error.localizedDescription }
+                engine.updateSession(id: session.id) { $0.lastError = error.localizedDescription }
             }
         }
     }
 
     private func deleteSession() {
-        if let node { workspace.engine.removeNode(node) }
-        try? workspace.store.deleteSession(id: sessionID)
+        if let node { engine.removeNode(node) }
+        try? engine.store.deleteSession(id: sessionID)
         if !path.isEmpty { path.removeLast() }
     }
 }
 
 private struct InstrumentRow: View {
     let instance: LumaCore.InstrumentInstance
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     private var descriptor: InstrumentDescriptor {
-        workspace.engine.descriptor(for: instance)
+        engine.descriptor(for: instance)
     }
 
     var body: some View {
@@ -532,19 +534,19 @@ private struct TraceRow: View {
 }
 
 struct PhoneSessionSwitcher: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let current: UUID
     let onPick: (UUID) -> Void
     let onNew: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(workspace.engine.sessions) { session in
+            ForEach(engine.sessions) { session in
                 Button {
                     onPick(session.id)
                 } label: {
                     HStack(spacing: 8) {
-                        PhoneSessionRow(session: session, workspace: workspace)
+                        PhoneSessionRow(session: session, engine: engine)
                         if session.id == current {
                             Image(systemName: "checkmark")
                                 .foregroundStyle(.tint)

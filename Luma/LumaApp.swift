@@ -21,7 +21,9 @@ func sharedGitHubAuth() -> GitHubAuth { sharedWelcomeModel.gitHubAuth }
         init() {
             SwiftyMonaco.prewarmPool(profile: MonacoEditorProfile(from: EditorProfile.fridaCodeShare()), count: 2)
             SwiftyMonaco.prewarmPool(profile: MonacoEditorProfile(from: EditorProfile.fridaTracerHook(packages: [])), count: 2)
-
+            MainActor.assumeIsolated {
+                InstrumentUIRegistry.shared.registerGlobalDefaults()
+            }
         }
 
         var body: some Scene {
@@ -163,6 +165,12 @@ func sharedGitHubAuth() -> GitHubAuth { sharedWelcomeModel.gitHubAuth }
     @main
     struct LumaApp: App {
         @UIApplicationDelegateAdaptor(LumaAppDelegate.self) var appDelegate
+
+        init() {
+            MainActor.assumeIsolated {
+                InstrumentUIRegistry.shared.registerGlobalDefaults()
+            }
+        }
 
         var body: some Scene {
             WindowGroup {

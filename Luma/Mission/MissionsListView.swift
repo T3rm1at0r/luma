@@ -2,12 +2,12 @@ import LumaCore
 import SwiftUI
 
 struct MissionsListView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var isShowingNewSheet = false
 
-    var missions: [Mission] { workspace.engine.missions }
+    var missions: [Mission] { engine.missions }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -27,7 +27,7 @@ struct MissionsListView: View {
             .padding(.horizontal)
             .padding(.top)
 
-            ExternalMCPSection(workspace: workspace)
+            ExternalMCPSection(engine: engine)
                 .padding(.horizontal)
                 .padding(.top, 8)
 
@@ -62,7 +62,7 @@ struct MissionsListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.background)
         .sheet(isPresented: $isShowingNewSheet) {
-            NewMissionSheet(workspace: workspace, isPresented: $isShowingNewSheet) { mission in
+            NewMissionSheet(engine: engine, isPresented: $isShowingNewSheet) { mission in
                 selection = .mission(mission.id)
             }
         }

@@ -5,7 +5,7 @@ import SwiftUI
 struct ITraceDetailView: View {
     let trace: LumaCore.ITrace
     let session: LumaCore.ProcessSession
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var decoded: DecodedITrace?
@@ -29,11 +29,11 @@ struct ITraceDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var node: LumaCore.ProcessNode? {
-        workspace.engine.node(forSessionID: session.id)
+        engine.node(forSessionID: session.id)
     }
 
     private var liveTrace: LumaCore.ITrace {
-        workspace.engine.tracesBySession[session.id]?.first(where: { $0.id == trace.id }) ?? trace
+        engine.tracesBySession[session.id]?.first(where: { $0.id == trace.id }) ?? trace
     }
 
     @State private var lastDecodedSize: Int = -1
@@ -123,7 +123,7 @@ struct ITraceDetailView: View {
             scheduleRedecodeIfNeeded(currentSize: newSize)
         }
         .task(id: trace.id) {
-            for await invalidation in workspace.engine.traceCacheInvalidations
+            for await invalidation in engine.traceCacheInvalidations
                 where invalidation.traceID == trace.id
             {
                 serverTotalSize = invalidation.knownTotalSize
@@ -137,7 +137,7 @@ struct ITraceDetailView: View {
 
     private func renderPrefix(snapshot: LumaCore.ITrace) async {
         do {
-            let preview = try await workspace.engine.loadTraceDataPrefix(
+            let preview = try await engine.loadTraceDataPrefix(
                 traceID: snapshot.id,
                 sessionID: session.id,
                 length: Self.firstPaintBytes
@@ -206,7 +206,7 @@ struct ITraceDetailView: View {
             if live.isRunning, isThreadOrigin(live.origin) {
                 Button {
                     Task { @MainActor in
-                        await workspace.engine.stopThreadTrace(traceID: trace.id, sessionID: session.id)
+                        await engine.stopThreadTrace(traceID: trace.id, sessionID: session.id)
                     }
                 } label: {
                     Label("Stop", systemImage: "stop.circle")
@@ -355,7 +355,7 @@ struct ITraceDetailView: View {
     }
 
     private var otherTracesForSameHook: [LumaCore.ITrace] {
-        let traces = (try? workspace.store.fetchITraces(sessionID: session.id)) ?? []
+        let traces = (try? engine.store.fetchITraces(sessionID: session.id)) ?? []
         return traces
             .filter { sameHook($0.origin, trace.origin) && $0.id != trace.id }
             .sorted(by: { $0.startedAt < $1.startedAt })
@@ -382,7 +382,7 @@ struct ITraceDetailView: View {
     @ViewBuilder
     private func diffSheet(with target: LumaCore.ITrace) -> some View {
         DiffLoader(
-            engine: workspace.engine,
+            engine: engine,
             sessionID: session.id,
             leftDecoded: decoded,
             target: target,
@@ -412,7 +412,7 @@ struct ITraceDetailView: View {
 
             do {
                 let expected = max(snapshot.dataSize, serverTotalSize)
-                let traceData = try await workspace.engine.loadTraceData(
+                let traceData = try await engine.loadTraceData(
                     traceID: snapshot.id,
                     sessionID: session.id,
                     expectedSize: expected,

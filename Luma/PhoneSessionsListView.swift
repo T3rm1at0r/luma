@@ -5,19 +5,21 @@ import LumaCore
 import SwiftUI
 
 struct PhoneSessionsListView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var path: [PhoneRoute]
     @Binding var activeDrawer: DrawerKind?
     let eventsIndicator: Bool
     let collabIndicator: Bool
     let documentActions: PhoneDocumentActions
 
+    @Environment(TargetPicker.self) private var picker
+
     @State private var pendingKillSession: LumaCore.ProcessSession?
     @State private var pendingDeleteSession: LumaCore.ProcessSession?
     @State private var isShowingNotebook = false
     @State private var isShowingHostingBlockedAlert = false
 
-    private var sessions: [LumaCore.ProcessSession] { workspace.engine.sessions }
+    private var sessions: [LumaCore.ProcessSession] { engine.sessions }
 
     private var header: some View {
         HStack(spacing: 8) {
@@ -97,17 +99,17 @@ struct PhoneSessionsListView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $isShowingNotebook) {
-            PhoneNotebookSheet(workspace: workspace)
+            PhoneNotebookSheet(engine: engine)
         }
         .sheet(
                 item: Binding(
-                    get: { workspace.targetPickerContext },
-                    set: { workspace.targetPickerContext = $0 }
+                    get: { picker.context },
+                    set: { picker.context = $0 }
                 ),
-                onDismiss: { workspace.targetPickerContext = nil }
+                onDismiss: { picker.context = nil }
             ) { ctx in
                 TargetPickerView(
-                    deviceManager: workspace.deviceManager,
+                    deviceManager: engine.deviceManager,
                     reason: {
                         if case .reestablish(_, let reason) = ctx { return reason }
                         return nil
@@ -165,7 +167,7 @@ struct PhoneSessionsListView: View {
                     Button {
                         path.append(.session(session.id))
                     } label: {
-                        PhoneSessionRow(session: session, workspace: workspace)
+                        PhoneSessionRow(session: session, engine: engine)
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -175,7 +177,7 @@ struct PhoneSessionsListView: View {
                             Label("Delete", systemImage: "trash")
                         }
 
-                        if workspace.engine.node(forSessionID: session.id) != nil {
+                        if engine.node(forSessionID: session.id) != nil {
                             Button {
                                 detachSession(session)
                             } label: {
@@ -237,14 +239,14 @@ struct PhoneSessionsListView: View {
                 processName: config.defaultDisplayName,
                 lastKnownPID: 0
             )
-            try? workspace.store.save(record)
-            _ = try? await workspace.engine.spawnAndAttach(device: device, session: record)
+            try? engine.store.save(record)
+            _ = try? await engine.spawnAndAttach(device: device, session: record)
         }
     }
 
     private func handleArm(device: Device, config: SpawnConfig, regex: String) {
         Task { @MainActor in
-            let session = await workspace.engine.armNewSession(
+            let session = await engine.armNewSession(
                 device: device,
                 config: config,
                 matchPattern: regex
@@ -254,13 +256,13 @@ struct PhoneSessionsListView: View {
     }
 
     private func handleAttach(device: Device, proc: ProcessDetails) {
-        let ctx = workspace.targetPickerContext
+        let ctx = picker.context
 
         Task { @MainActor in
-            if let existing = workspace.engine.processNodes.first(where: {
+            if let existing = engine.processNodes.first(where: {
                 $0.deviceID == device.id && $0.pid == proc.pid
             }) {
-                let existingID = workspace.engine.sessionID(for: existing)
+                let existingID = engine.sessionID(for: existing)
                 path.append(.session(existingID))
                 return
             }
@@ -282,8 +284,8 @@ struct PhoneSessionsListView: View {
             record.processName = proc.name
             record.lastKnownPID = proc.pid
             record.adoptIcon(from: proc)
-            try? workspace.store.save(record)
-            _ = try? await workspace.engine.attach(device: device, process: proc, session: record)
+            try? engine.store.save(record)
+            _ = try? await engine.attach(device: device, process: proc, session: record)
 
             path.append(.session(record.id))
         }
@@ -291,49 +293,49 @@ struct PhoneSessionsListView: View {
 
     private func reestablish(_ session: LumaCore.ProcessSession) {
         Task { @MainActor in
-            let result = await workspace.engine.reestablishSession(id: session.id)
+            let result = await engine.reestablishSession(id: session.id)
             if case .needsUserInput(let reason, let s) = result {
-                workspace.targetPickerContext = .reestablish(session: s, reason: reason)
+                picker.context = .reestablish(session: s, reason: reason)
             }
         }
     }
 
     private func requestNewSession() {
-        if workspace.engine.canHostNewSessions {
-            workspace.targetPickerContext = .newSession
+        if engine.canHostNewSessions {
+            picker.context = .newSession
         } else {
             isShowingHostingBlockedAlert = true
         }
     }
 
     private func killProcess(_ session: LumaCore.ProcessSession) {
-        guard let node = workspace.engine.node(forSessionID: session.id) else { return }
+        guard let node = engine.node(forSessionID: session.id) else { return }
         Task { @MainActor in
             do { try await node.kill() } catch {
-                workspace.engine.updateSession(id: session.id) { $0.lastError = error.localizedDescription }
+                engine.updateSession(id: session.id) { $0.lastError = error.localizedDescription }
             }
         }
     }
 
     private func detachSession(_ session: LumaCore.ProcessSession) {
-        guard let node = workspace.engine.node(forSessionID: session.id) else { return }
-        workspace.engine.removeNode(node)
+        guard let node = engine.node(forSessionID: session.id) else { return }
+        engine.removeNode(node)
     }
 
     private func deleteSession(_ session: LumaCore.ProcessSession) {
-        if let node = workspace.engine.node(forSessionID: session.id) {
-            workspace.engine.removeNode(node)
+        if let node = engine.node(forSessionID: session.id) {
+            engine.removeNode(node)
         }
-        try? workspace.store.deleteSession(id: session.id)
+        try? engine.store.deleteSession(id: session.id)
     }
 }
 
 struct PhoneSessionRow: View {
     let session: LumaCore.ProcessSession
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     private var node: LumaCore.ProcessNode? {
-        workspace.engine.node(forSessionID: session.id)
+        engine.node(forSessionID: session.id)
     }
 
     var body: some View {

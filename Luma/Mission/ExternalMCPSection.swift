@@ -6,7 +6,7 @@ import AppKit
 #endif
 
 struct ExternalMCPSection: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     @State private var isToggling = false
     @State private var lastError: String?
@@ -18,7 +18,7 @@ struct ExternalMCPSection: View {
                     .foregroundStyle(.tint)
                 Text("External MCP Server").font(.headline)
                 Spacer()
-                if workspace.engine.isExternalMCPRunning {
+                if engine.isExternalMCPRunning {
                     Button("Disable") {
                         Task { await disable() }
                     }
@@ -32,8 +32,8 @@ struct ExternalMCPSection: View {
                 }
             }
 
-            if let url = workspace.engine.externalMCPURL,
-                let token = workspace.engine.externalMCPServer?.bearerToken
+            if let url = engine.externalMCPURL,
+                let token = engine.externalMCPServer?.bearerToken
             {
                 runningBody(url: url, token: token)
             } else {
@@ -86,7 +86,7 @@ struct ExternalMCPSection: View {
         isToggling = true
         defer { isToggling = false }
         do {
-            _ = try await workspace.engine.enableExternalMCPServer()
+            _ = try await engine.enableExternalMCPServer()
             lastError = nil
         } catch {
             lastError = "could not enable: \(error.localizedDescription)"
@@ -96,7 +96,7 @@ struct ExternalMCPSection: View {
     private func disable() async {
         isToggling = true
         defer { isToggling = false }
-        await workspace.engine.disableExternalMCPServer()
+        await engine.disableExternalMCPServer()
         lastError = nil
     }
 
@@ -104,7 +104,7 @@ struct ExternalMCPSection: View {
         isToggling = true
         defer { isToggling = false }
         do {
-            _ = try await workspace.engine.rotateExternalMCPToken()
+            _ = try await engine.rotateExternalMCPToken()
             lastError = nil
         } catch {
             lastError = "could not rotate: \(error.localizedDescription)"

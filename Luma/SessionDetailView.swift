@@ -11,27 +11,27 @@ enum SessionDetailSection: String, CaseIterable, Identifiable, Codable {
 
 struct SessionDetailView: View {
     let sessionID: UUID
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     private var section: Binding<SessionDetailSection> {
         Binding(
-            get: { workspace.sessionDetailSection(for: sessionID) },
-            set: { workspace.setSessionDetailSection(sessionID: sessionID, section: $0) }
+            get: { engine.sessionDetailSection(for: sessionID) },
+            set: { engine.setSessionDetailSection(sessionID: sessionID, section: $0) }
         )
     }
 
     private var selectedModuleID: Binding<ProcessModule.ID?> {
         Binding(
-            get: { workspace.lastSelectedModuleID(for: sessionID) },
-            set: { workspace.setLastSelectedModuleID(sessionID: sessionID, moduleID: $0) }
+            get: { engine.lastSelectedModuleID(for: sessionID) },
+            set: { engine.setLastSelectedModuleID(sessionID: sessionID, moduleID: $0) }
         )
     }
 
     private var selectedThreadID: Binding<ProcessThread.ID?> {
         Binding(
-            get: { workspace.lastSelectedThreadID(for: sessionID) },
-            set: { workspace.setLastSelectedThreadID(sessionID: sessionID, threadID: $0) }
+            get: { engine.lastSelectedThreadID(for: sessionID) },
+            set: { engine.setLastSelectedThreadID(sessionID: sessionID, threadID: $0) }
         )
     }
 
@@ -47,11 +47,11 @@ struct SessionDetailView: View {
     }
 
     private var session: LumaCore.ProcessSession? {
-        workspace.engine.session(id: sessionID)
+        engine.session(id: sessionID)
     }
 
     private var node: LumaCore.ProcessNode? {
-        workspace.engine.node(forSessionID: sessionID)
+        engine.node(forSessionID: sessionID)
     }
 
     private var header: some View {
@@ -156,7 +156,7 @@ struct SessionDetailView: View {
                 ModuleDetailView(
                     sessionID: sessionID,
                     module: module,
-                    workspace: workspace,
+                    engine: engine,
                     selection: $selection
                 )
                 .frame(minWidth: 360)
@@ -209,7 +209,7 @@ struct SessionDetailView: View {
                 ThreadDetailView(
                     sessionID: sessionID,
                     thread: thread,
-                    workspace: workspace,
+                    engine: engine,
                     selection: $selection
                 )
                 .id(thread.id)
@@ -251,12 +251,12 @@ struct SessionDetailView: View {
 
     @ViewBuilder
     private func threadActionsMenu(for thread: ProcessThread) -> some View {
-        let actions = workspace.engine.threadActions(sessionID: sessionID, thread: thread)
+        let actions = engine.threadActions(sessionID: sessionID, thread: thread)
         ForEach(actions) { action in
             Button(role: action.role == .destructive ? .destructive : nil) {
                 Task { @MainActor in
                     if let target = await action.perform() {
-                        selection = workspace.sidebarItem(for: target)
+                        selection = SidebarItemID(navigationTarget: target)
                     }
                 }
             } label: {

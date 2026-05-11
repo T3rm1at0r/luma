@@ -6,13 +6,13 @@ import UniformTypeIdentifiers
 private let subrowIconWidth: CGFloat = 16
 
 struct SidebarView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
-    var sessions: [LumaCore.ProcessSession] { workspace.engine.sessions }
-    var packages: [LumaCore.InstalledPackage] { workspace.engine.installedPackages }
-    var customInstrumentDefs: [LumaCore.CustomInstrumentDef] { workspace.engine.customInstruments.defs }
-    var missions: [LumaCore.Mission] { workspace.engine.missions }
+    var sessions: [LumaCore.ProcessSession] { engine.sessions }
+    var packages: [LumaCore.InstalledPackage] { engine.installedPackages }
+    var customInstrumentDefs: [LumaCore.CustomInstrumentDef] { engine.customInstruments.defs }
+    var missions: [LumaCore.Mission] { engine.missions }
 
     var body: some View {
         List(selection: $selection) {
@@ -22,22 +22,22 @@ struct SidebarView: View {
                 SidebarMissionsRow(count: missions.count)
                     .tag(SidebarItemID.missions)
                 ForEach(missions) { mission in
-                    SidebarMissionRow(mission: mission, workspace: workspace, selection: $selection)
+                    SidebarMissionRow(mission: mission, engine: engine, selection: $selection)
                         .tag(SidebarItemID.mission(mission.id))
                 }
             }
 
             Section("Sessions") {
                 ForEach(sessions) { session in
-                    let node = workspace.engine.node(forSessionID: session.id)
-                    let instruments = workspace.engine.instrumentsBySession[session.id] ?? []
-                    let insights = workspace.engine.insightsBySession[session.id] ?? []
-                    let traces = workspace.engine.tracesBySession[session.id] ?? []
+                    let node = engine.node(forSessionID: session.id)
+                    let instruments = engine.instrumentsBySession[session.id] ?? []
+                    let insights = engine.insightsBySession[session.id] ?? []
+                    let traces = engine.tracesBySession[session.id] ?? []
 
                     SidebarSessionHeaderRow(
                         session: session,
                         node: node,
-                        workspace: workspace,
+                        engine: engine,
                         selection: $selection
                     )
                     .tag(SidebarItemID.session(session.id))
@@ -50,7 +50,7 @@ struct SidebarView: View {
                             session: session,
                             node: node,
                             instance: instance,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection
                         )
                         .tag(SidebarItemID.instrument(session.id, instance.id))
@@ -60,7 +60,7 @@ struct SidebarView: View {
                         SidebarInsightRow(
                             session: session,
                             insight: insight,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection
                         )
                         .tag(SidebarItemID.insight(session.id, insight.id))
@@ -70,7 +70,7 @@ struct SidebarView: View {
                         SidebarITraceRow(
                             session: session,
                             trace: trace,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection
                         )
                         .tag(SidebarItemID.itrace(session.id, trace.id))
@@ -84,7 +84,7 @@ struct SidebarView: View {
                     ForEach(customInstrumentDefs) { def in
                         SidebarCustomInstrumentDefRow(
                             def: def,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection
                         )
                         .tag(SidebarItemID.customInstrumentDef(def.id))
@@ -140,7 +140,7 @@ private struct SidebarMissionsRow: View {
 
 private struct SidebarMissionRow: View {
     let mission: LumaCore.Mission
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var isShowingDeleteConfirmation = false
@@ -181,7 +181,7 @@ private struct SidebarMissionRow: View {
         if selection == .mission(mission.id) {
             selection = .missions
         }
-        workspace.engine.deleteMission(missionID: mission.id)
+        engine.deleteMission(missionID: mission.id)
     }
 
     private var displayTitle: String {
@@ -214,8 +214,10 @@ private struct SidebarMissionRow: View {
 private struct SidebarSessionHeaderRow: View {
     let session: LumaCore.ProcessSession
     let node: LumaCore.ProcessNode?
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
+
+    @Environment(TargetPicker.self) private var picker
 
     @State private var isShowingConfirmation = false
     @State private var confirmationTitle: String = ""
@@ -250,8 +252,8 @@ private struct SidebarSessionHeaderRow: View {
         }
         .padding(.vertical, 4)
         .contextMenu {
-            if !workspace.engine.localUserHosts(session.id) {
-                if workspace.engine.collaboration.isOwner {
+            if !engine.localUserHosts(session.id) {
+                if engine.collaboration.isOwner {
                     Button {
                         rehost()
                     } label: {
@@ -270,7 +272,7 @@ private struct SidebarSessionHeaderRow: View {
                 }
 
                 Button {
-                    workspace.engine.removeNode(node)
+                    engine.removeNode(node)
                 } label: {
                     Label("Detach Session", systemImage: "bolt.slash")
                 }
@@ -365,7 +367,7 @@ private struct SidebarSessionHeaderRow: View {
     }
 
     private func presentArmPrompt() {
-        armPatternDraft = workspace.engine.defaultArmPattern(for: session)
+        armPatternDraft = engine.defaultArmPattern(for: session)
         isShowingArmPrompt = true
     }
 
@@ -374,14 +376,14 @@ private struct SidebarSessionHeaderRow: View {
         guard !pattern.isEmpty else { return }
         let sessionID = session.id
         Task { @MainActor in
-            await workspace.engine.armSession(id: sessionID, matchPattern: pattern)
+            await engine.armSession(id: sessionID, matchPattern: pattern)
         }
     }
 
     private func disarm() {
         let sessionID = session.id
         Task { @MainActor in
-            await workspace.engine.disarmSession(id: sessionID)
+            await engine.disarmSession(id: sessionID)
         }
     }
 
@@ -390,7 +392,7 @@ private struct SidebarSessionHeaderRow: View {
 
     @ViewBuilder
     private var iconView: some View {
-        if let host = session.host, host.id != workspace.engine.collaboration.localUser?.id {
+        if let host = session.host, host.id != engine.collaboration.localUser?.id {
             hostAvatarView(host: host)
         } else if let data = session.iconPNGData {
             Icon.png(data: Array(data)).swiftUIImage
@@ -418,18 +420,18 @@ private struct SidebarSessionHeaderRow: View {
 
     private func reestablish() {
         Task { @MainActor in
-            let result = await workspace.engine.reestablishSession(id: session.id)
+            let result = await engine.reestablishSession(id: session.id)
             if case .needsUserInput(let reason, let session) = result {
-                workspace.targetPickerContext = .reestablish(session: session, reason: reason)
+                picker.context = .reestablish(session: session, reason: reason)
             }
         }
     }
 
     private func rehost() {
         Task { @MainActor in
-            let result = await workspace.engine.reHost(sessionID: session.id)
+            let result = await engine.reHost(sessionID: session.id)
             if case .needsUserInput(let reason, let session) = result {
-                workspace.targetPickerContext = .reestablish(session: session, reason: reason)
+                picker.context = .reestablish(session: session, reason: reason)
             }
         }
     }
@@ -438,16 +440,16 @@ private struct SidebarSessionHeaderRow: View {
         guard let node else { return }
         Task { @MainActor in
             do { try await node.kill() } catch {
-                workspace.engine.updateSession(id: session.id) { $0.lastError = error.localizedDescription }
+                engine.updateSession(id: session.id) { $0.lastError = error.localizedDescription }
             }
         }
     }
 
     private func deleteSession() {
-        if let node { workspace.engine.removeNode(node) }
+        if let node { engine.removeNode(node) }
         let sessionID = session.id
 
-        try? workspace.store.deleteSession(id: sessionID)
+        try? engine.store.deleteSession(id: sessionID)
 
         switch selection {
         case .session(let id) where id == sessionID,
@@ -499,13 +501,13 @@ private struct SidebarInstrumentRow: View {
     let session: LumaCore.ProcessSession
     let node: LumaCore.ProcessNode?
     let instance: LumaCore.InstrumentInstance
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var isShowingDeleteConfirm = false
 
     private var descriptor: InstrumentDescriptor {
-        workspace.engine.descriptor(for: instance)
+        engine.descriptor(for: instance)
     }
 
     var body: some View {
@@ -523,7 +525,7 @@ private struct SidebarInstrumentRow: View {
             Button {
                 let newState: LumaCore.InstrumentState = instance.state == .enabled ? .disabled : .enabled
                 Task { @MainActor in
-                    await workspace.engine.setInstrumentState(instance, state: newState)
+                    await engine.setInstrumentState(instance, state: newState)
                 }
             } label: {
                 Label(
@@ -558,7 +560,7 @@ private struct SidebarInstrumentRow: View {
 
     private func deleteInstrument() {
         Task {
-            await workspace.engine.removeInstrument(instance)
+            await engine.removeInstrument(instance)
         }
 
         if selection == .instrument(session.id, instance.id) {
@@ -570,7 +572,7 @@ private struct SidebarInstrumentRow: View {
 private struct SidebarInsightRow: View {
     let session: LumaCore.ProcessSession
     let insight: LumaCore.AddressInsight
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     var body: some View {
@@ -595,7 +597,7 @@ private struct SidebarInsightRow: View {
     }
 
     private func deleteInsight() {
-        try? workspace.store.deleteInsight(id: insight.id)
+        try? engine.store.deleteInsight(id: insight.id)
 
         if selection == .insight(session.id, insight.id) {
             selection = .repl(session.id)
@@ -606,7 +608,7 @@ private struct SidebarInsightRow: View {
 private struct SidebarITraceRow: View {
     let session: LumaCore.ProcessSession
     let trace: LumaCore.ITrace
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var isShowingDeleteConfirm = false
@@ -645,7 +647,7 @@ private struct SidebarITraceRow: View {
     }
 
     private func deleteTrace() {
-        workspace.engine.deleteITrace(id: trace.id, sessionID: session.id)
+        engine.deleteITrace(id: trace.id, sessionID: session.id)
         if selection == .itrace(session.id, trace.id) {
             selection = .repl(session.id)
         }
@@ -654,7 +656,7 @@ private struct SidebarITraceRow: View {
 
 struct SidebarCustomInstrumentDefRow: View {
     let def: LumaCore.CustomInstrumentDef
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var isShowingRename = false
@@ -704,19 +706,19 @@ struct SidebarCustomInstrumentDefRow: View {
         .popover(isPresented: $isShowingRename, arrowEdge: .trailing) {
             CustomInstrumentRenamePopover(
                 def: def,
-                workspace: workspace
+                engine: engine
             )
         }
         .popover(isPresented: $isShowingFeatures, arrowEdge: .trailing) {
             CustomInstrumentFeaturesPopover(
                 def: def,
-                workspace: workspace
+                engine: engine
             )
         }
         .popover(isPresented: $isShowingWidgets, arrowEdge: .trailing) {
             CustomInstrumentWidgetsPopover(
                 def: def,
-                workspace: workspace
+                engine: engine
             )
         }
         .confirmationDialog(
@@ -726,7 +728,7 @@ struct SidebarCustomInstrumentDefRow: View {
         ) {
             Button("Delete", role: .destructive) {
                 Task { @MainActor in
-                    await workspace.engine.deleteCustomInstrument(def.id)
+                    await engine.deleteCustomInstrument(def.id)
                     if selection == .customInstrumentDef(def.id) {
                         selection = .notebook
                     }
@@ -770,7 +772,7 @@ struct SidebarCustomInstrumentDefRow: View {
 
     private func presentExportPicker() {
         do {
-            let bundle = try workspace.engine.buildHookPackBundle(for: def)
+            let bundle = try engine.buildHookPackBundle(for: def)
             exportBundle = HookPackExportBundle(bundle: bundle)
         } catch {
             exportErrorMessage = error.localizedDescription
@@ -819,7 +821,7 @@ struct HookPackExportDocument: FileDocument {
 
 struct CustomInstrumentRenamePopover: View {
     let def: LumaCore.CustomInstrumentDef
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Environment(\.dismiss) private var dismiss
 
     @State private var draftName: String = ""
@@ -914,7 +916,7 @@ struct CustomInstrumentRenamePopover: View {
         updated.name = draftName.trimmingCharacters(in: .whitespaces)
         updated.icon = draftIcon
         Task { @MainActor in
-            await workspace.engine.updateCustomInstrument(updated)
+            await engine.updateCustomInstrument(updated)
             dismiss()
         }
     }

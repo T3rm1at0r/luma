@@ -4,7 +4,7 @@ import SwiftyMonaco
 
 struct CodeShareConfigView: View {
     @Binding var config: CodeShareConfig
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     @State private var draftSource: String = ""
     @State private var isDirty = false
@@ -138,7 +138,7 @@ struct CodeShareConfigView: View {
                 text: $draftSource,
                 profile: EditorProfile.fridaCodeShare(),
                 introspector: monacoIntrospector,
-                workspace: workspace,
+                engine: engine,
             )
         }
     }

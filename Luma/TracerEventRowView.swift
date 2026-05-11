@@ -5,7 +5,7 @@ struct TracerEventRowView: View {
     let messageView: AnyView
     let process: LumaCore.ProcessNode?
     let backtrace: [JSInspectValue]?
-    let workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var showBacktracePopover = false
@@ -39,7 +39,7 @@ struct TracerEventRowView: View {
                     TracerBacktraceView(
                         process: process,
                         pointers: backtrace,
-                        workspace: workspace,
+                        engine: engine,
                         selection: $selection
                     )
                     .frame(minWidth: 520, minHeight: 280)
@@ -53,7 +53,7 @@ struct TracerEventRowView: View {
 private struct TracerBacktraceView: View {
     let process: LumaCore.ProcessNode
     let pointers: [JSInspectValue]
-    let workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var symbols: [SymbolicateResult] = []
@@ -147,9 +147,9 @@ private struct TracerBacktraceView: View {
     }
 
     private func openDisassembly(at address: UInt64) {
-        let sessionID = workspace.engine.sessionID(for: process)
+        let sessionID = engine.sessionID(for: process)
         do {
-            let insight = try workspace.engine.getOrCreateInsight(
+            let insight = try engine.getOrCreateInsight(
                 sessionID: sessionID,
                 pointer: address,
                 kind: .disassembly

@@ -169,12 +169,12 @@ struct PhoneRootView: View {
 }
 
 struct PhoneNotebookSheet: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            NotebookView(workspace: workspace, selection: .constant(nil))
+            NotebookView(engine: engine, selection: .constant(nil))
                 .navigationTitle("Notebook")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {

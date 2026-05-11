@@ -4,15 +4,15 @@ import SwiftUI
 struct InstrumentDetailView: View {
     let instanceID: UUID
     let sessionID: UUID
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     private var instance: LumaCore.InstrumentInstance? {
-        try? workspace.store.fetchInstrument(id: instanceID)
+        try? engine.store.fetchInstrument(id: instanceID)
     }
 
     private var session: LumaCore.ProcessSession? {
-        try? workspace.store.fetchSession(id: sessionID)
+        try? engine.store.fetchSession(id: sessionID)
     }
 
     private var configBinding: Binding<Data> {
@@ -21,7 +21,7 @@ struct InstrumentDetailView: View {
             set: { newValue in
                 guard let snapshot = instance else { return }
                 Task { @MainActor in
-                    await workspace.engine.applyInstrumentConfig(snapshot, configJSON: newValue)
+                    await engine.applyInstrumentConfig(snapshot, configJSON: newValue)
                 }
             }
         )
@@ -31,7 +31,7 @@ struct InstrumentDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 if let inst = instance, let ui = InstrumentUIRegistry.shared.ui(for: inst) {
-                    ui.makeConfigEditor(configJSON: configBinding, workspace: workspace, selection: $selection)
+                    ui.makeConfigEditor(configJSON: configBinding, engine: engine, selection: $selection)
                         .environment(\.instrumentSession, session)
                         .environment(\.instrumentInstance, inst)
                 } else {

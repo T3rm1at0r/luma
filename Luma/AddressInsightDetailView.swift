@@ -4,7 +4,7 @@ import SwiftUI
 struct AddressInsightDetailView: View {
     let session: LumaCore.ProcessSession
     @State var insight: LumaCore.AddressInsight
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var refreshDebounce: Task<Void, Never>?
@@ -19,7 +19,7 @@ struct AddressInsightDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var node: LumaCore.ProcessNode? {
-        workspace.engine.node(forSessionID: session.id)
+        engine.node(forSessionID: session.id)
     }
 
     var body: some View {
@@ -40,7 +40,7 @@ struct AddressInsightDetailView: View {
                         DisassemblyView(
                             lines: disasmLines,
                             sessionID: session.id,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection,
                             onNeedMore: { loadMoreDisasm() }
                         )
@@ -175,7 +175,7 @@ struct AddressInsightDetailView: View {
         start: UInt64,
         count: Int = 64
     ) async -> [DisassemblyLine] {
-        guard let disassembler = workspace.engine.disassembler(forSessionID: session.id) else {
+        guard let disassembler = engine.disassembler(forSessionID: session.id) else {
             return []
         }
         return await disassembler.disassemble(
@@ -188,7 +188,7 @@ struct DisassemblyView: View {
     let lines: [DisassemblyLine]
 
     let sessionID: UUID
-    let workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
     let onNeedMore: () -> Void
 
@@ -213,7 +213,7 @@ struct DisassemblyView: View {
                         DisasmRow(
                             line: line,
                             sessionID: sessionID,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection,
                             rowHeight: rowHeight,
                             isSelected: selectedAddr == line.address,
@@ -321,7 +321,7 @@ struct DisassemblyView: View {
                 }
             }
         } else {
-            let insight = try workspace.engine.getOrCreateInsight(
+            let insight = try engine.getOrCreateInsight(
                 sessionID: sessionID,
                 pointer: target,
                 kind: .disassembly
@@ -367,7 +367,7 @@ private struct DisasmRow: View {
     let line: DisassemblyLine
 
     let sessionID: UUID
-    let workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     let rowHeight: CGFloat
@@ -392,7 +392,7 @@ private struct DisasmRow: View {
                 .frame(width: 110, alignment: .leading)
                 .contentShape(Rectangle())
                 .overlay(alignment: .leading) {
-                    let decorations = workspace.engine.addressAnnotations[sessionID]?[line.address]?.decorations ?? []
+                    let decorations = engine.addressAnnotations[sessionID]?[line.address]?.decorations ?? []
 
                     HStack(spacing: 3) {
                         ForEach(decorations.prefix(3)) { deco in
@@ -415,11 +415,11 @@ private struct DisasmRow: View {
 
                     Divider()
 
-                    ForEach(workspace.engine.addressActions(sessionID: sessionID, address: line.address)) { action in
+                    ForEach(engine.addressActions(sessionID: sessionID, address: line.address)) { action in
                         Button(role: action.role == .destructive ? .destructive : nil) {
                             Task { @MainActor in
                                 if let target = await action.perform() {
-                                    selection = workspace.sidebarItem(for: target)
+                                    selection = SidebarItemID(navigationTarget: target)
                                 }
                             }
                         } label: {

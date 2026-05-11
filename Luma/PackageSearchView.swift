@@ -5,7 +5,7 @@ import SwiftUI
 struct PackageSearchView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var query: String = ""
@@ -210,7 +210,7 @@ struct PackageSearchView: View {
             defer { isInstalling = false }
 
             do {
-                let installed = try await workspace.engine.installPackage(
+                let installed = try await engine.installPackage(
                     name: name,
                     versionSpec: versionSpec,
                     globalAlias: alias

@@ -4,21 +4,21 @@ import SwiftUI
 
 struct SessionContent<Content: View>: View {
     let sessionID: UUID?
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(spacing: 0) {
             if let sessionID {
-                SessionCollaborationHeader(sessionID: sessionID, workspace: workspace)
+                SessionCollaborationHeader(sessionID: sessionID, engine: engine)
             }
             switch bannerState {
             case .armed(let session):
-                SessionArmedBanner(session: session, workspace: workspace)
+                SessionArmedBanner(session: session, engine: engine)
             case .detached(let session):
-                SessionDetachedBanner(session: session, workspace: workspace)
+                SessionDetachedBanner(session: session, engine: engine)
             case .idle(let session):
-                SessionIdleBanner(session: session, workspace: workspace)
+                SessionIdleBanner(session: session, engine: engine)
             case .none:
                 EmptyView()
             }
@@ -35,10 +35,10 @@ struct SessionContent<Content: View>: View {
 
     private var bannerState: BannerState {
         guard let sessionID,
-              let session = workspace.engine.sessions.first(where: { $0.id == sessionID })
+              let session = engine.sessions.first(where: { $0.id == sessionID })
         else { return .none }
 
-        let isAttached = workspace.engine.node(forSessionID: session.id) != nil
+        let isAttached = engine.node(forSessionID: session.id) != nil
         if !isAttached, case .armed = session.armingState {
             return .armed(session)
         }
@@ -58,7 +58,7 @@ struct SessionContent<Content: View>: View {
 
 struct SessionIdleBanner: View {
     let session: LumaCore.ProcessSession
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     @State private var isShowingArmPrompt = false
     @State private var armPatternDraft = ""
@@ -101,7 +101,7 @@ struct SessionIdleBanner: View {
     }
 
     private func presentArmPrompt() {
-        armPatternDraft = workspace.engine.defaultArmPattern(for: session)
+        armPatternDraft = engine.defaultArmPattern(for: session)
         isShowingArmPrompt = true
     }
 
@@ -110,14 +110,14 @@ struct SessionIdleBanner: View {
         guard !pattern.isEmpty else { return }
         let sessionID = session.id
         Task { @MainActor in
-            await workspace.engine.armSession(id: sessionID, matchPattern: pattern)
+            await engine.armSession(id: sessionID, matchPattern: pattern)
         }
     }
 }
 
 struct SessionArmedBanner: View {
     let session: LumaCore.ProcessSession
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     var body: some View {
         LumaBanner(style: bannerStyle) {
@@ -162,7 +162,7 @@ struct SessionArmedBanner: View {
     }
 
     private var isActive: Bool {
-        workspace.engine.isGatingActive(forDeviceID: session.deviceID)
+        engine.isGatingActive(forDeviceID: session.deviceID)
     }
 
     private var hasError: Bool {
@@ -190,21 +190,23 @@ struct SessionArmedBanner: View {
     private func resume() {
         let sessionID = session.id
         Task { @MainActor in
-            await workspace.engine.resumeGating(forSessionID: sessionID)
+            await engine.resumeGating(forSessionID: sessionID)
         }
     }
 
     private func disarm() {
         let sessionID = session.id
         Task { @MainActor in
-            await workspace.engine.disarmSession(id: sessionID)
+            await engine.disarmSession(id: sessionID)
         }
     }
 }
 
 struct SessionDetachedBanner: View {
     let session: LumaCore.ProcessSession
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
+
+    @Environment(TargetPicker.self) private var picker
 
     var body: some View {
         LumaBanner(style: bannerStyle) {
@@ -287,9 +289,9 @@ struct SessionDetachedBanner: View {
 
     private func reestablish() {
         Task { @MainActor in
-            let result = await workspace.engine.reestablishSession(id: session.id)
+            let result = await engine.reestablishSession(id: session.id)
             if case .needsUserInput(let reason, let session) = result {
-                workspace.targetPickerContext = .reestablish(session: session, reason: reason)
+                picker.context = .reestablish(session: session, reason: reason)
             }
         }
     }

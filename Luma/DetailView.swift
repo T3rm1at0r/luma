@@ -3,7 +3,7 @@ import LumaCore
 import SwiftUI
 
 struct DetailView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     var body: some View {
@@ -11,7 +11,7 @@ struct DetailView: View {
             switch selection {
             case .none:
                 NotebookEmptyStateView(
-                    workspace: workspace,
+                    engine: engine,
                     onAddNote: {
                         let note = LumaCore.NotebookEntry(
                             kind: .note,
@@ -20,45 +20,45 @@ struct DetailView: View {
                             binaryData: nil,
                             processName: nil
                         )
-                        workspace.engine.addNotebookEntry(note, after: nil)
+                        engine.addNotebookEntry(note, after: nil)
                         selection = .notebook
                     }
                 )
 
             case .some(.notebook):
-                NotebookView(workspace: workspace, selection: $selection)
+                NotebookView(engine: engine, selection: $selection)
 
             case .some(.missions):
-                MissionsListView(workspace: workspace, selection: $selection)
+                MissionsListView(engine: engine, selection: $selection)
 
             case .some(.mission(let missionID)):
-                MissionView(workspace: workspace, missionID: missionID, selection: $selection)
+                MissionView(engine: engine, missionID: missionID, selection: $selection)
                     .id(missionID)
 
             case .some(.session(let sessionID)):
-                if workspace.engine.sessions.contains(where: { $0.id == sessionID }) {
-                    SessionContent(sessionID: sessionID, workspace: workspace) {
-                        SessionDetailView(sessionID: sessionID, workspace: workspace, selection: $selection)
+                if engine.sessions.contains(where: { $0.id == sessionID }) {
+                    SessionContent(sessionID: sessionID, engine: engine) {
+                        SessionDetailView(sessionID: sessionID, engine: engine, selection: $selection)
                     }
                     .id(sessionID)
                 }
 
             case .some(.repl(let sessionID)):
-                if let session = workspace.engine.sessions.first(where: { $0.id == sessionID }) {
-                    SessionContent(sessionID: sessionID, workspace: workspace) {
-                        REPLView(sessionID: sessionID, workspace: workspace, selection: $selection)
+                if let session = engine.sessions.first(where: { $0.id == sessionID }) {
+                    SessionContent(sessionID: sessionID, engine: engine) {
+                        REPLView(sessionID: sessionID, engine: engine, selection: $selection)
                     }
                     .id(session.id)
                 }
 
             case .some(.instrument(let sessionID, let instID)),
                 .some(.instrumentComponent(let sessionID, let instID, _, _)):
-                if (try? workspace.store.fetchInstrument(id: instID)) != nil {
-                    SessionContent(sessionID: sessionID, workspace: workspace) {
+                if (try? engine.store.fetchInstrument(id: instID)) != nil {
+                    SessionContent(sessionID: sessionID, engine: engine) {
                         InstrumentDetailView(
                             instanceID: instID,
                             sessionID: sessionID,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection
                         )
                     }
@@ -66,36 +66,36 @@ struct DetailView: View {
                 }
 
             case .some(.itrace(let sessionID, let traceID)):
-                let session = workspace.engine.sessions.first(where: { $0.id == sessionID })
+                let session = engine.sessions.first(where: { $0.id == sessionID })
                 if let session,
-                    let trace = (try? workspace.store.fetchITraces(sessionID: sessionID))?.first(where: { $0.id == traceID })
+                    let trace = (try? engine.store.fetchITraces(sessionID: sessionID))?.first(where: { $0.id == traceID })
                 {
-                    SessionContent(sessionID: sessionID, workspace: workspace) {
+                    SessionContent(sessionID: sessionID, engine: engine) {
                         ITraceDetailView(
-                            trace: trace, session: session, workspace: workspace, selection: $selection)
+                            trace: trace, session: session, engine: engine, selection: $selection)
                     }
                     .id(trace.id)
                 }
 
             case .some(.insight(let sessionID, let insightID)):
-                let session = workspace.engine.sessions.first(where: { $0.id == sessionID })
+                let session = engine.sessions.first(where: { $0.id == sessionID })
                 if let session,
-                    let insight = (try? workspace.store.fetchInsights(sessionID: sessionID))?.first(where: { $0.id == insightID })
+                    let insight = (try? engine.store.fetchInsights(sessionID: sessionID))?.first(where: { $0.id == insightID })
                 {
-                    SessionContent(sessionID: sessionID, workspace: workspace) {
+                    SessionContent(sessionID: sessionID, engine: engine) {
                         AddressInsightDetailView(
-                            session: session, insight: insight, workspace: workspace, selection: $selection)
+                            session: session, insight: insight, engine: engine, selection: $selection)
                     }
                     .id(insight.id)
                 }
 
             case .some(.customInstrumentDef(let defID)):
-                CustomInstrumentEditorView(defID: defID, workspace: workspace)
+                CustomInstrumentEditorView(defID: defID, engine: engine)
                     .id(defID)
 
             case .some(.package(let packageID)):
-                if let package = workspace.engine.installedPackages.first(where: { $0.id == packageID }) {
-                    PackageDetailView(package: package, workspace: workspace, selection: $selection)
+                if let package = engine.installedPackages.first(where: { $0.id == packageID }) {
+                    PackageDetailView(package: package, engine: engine, selection: $selection)
                         .id(package.id)
                 }
             }

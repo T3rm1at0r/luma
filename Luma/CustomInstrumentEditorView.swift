@@ -4,14 +4,14 @@ import SwiftyMonaco
 
 struct CustomInstrumentEditorView: View {
     let defID: UUID
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     @State private var draftSource: String = ""
     @State private var isDirty = false
     @State private var showSavedCheck = false
 
     private var def: CustomInstrumentDef? {
-        workspace.engine.customInstruments.def(withId: defID)
+        engine.customInstruments.def(withId: defID)
     }
 
     var body: some View {
@@ -34,11 +34,11 @@ struct CustomInstrumentEditorView: View {
             CodeEditorView(
                 text: $draftSource,
                 profile: EditorProfile.fridaCustomInstrument(
-                    packages: workspace.engine.installedPackages,
+                    packages: engine.installedPackages,
                     def: def
                 ),
                 introspector: nil,
-                workspace: workspace,
+                engine: engine,
             )
             .accessibilityIdentifier("customInstrument.editor")
         }
@@ -85,7 +85,7 @@ struct CustomInstrumentEditorView: View {
         guard var d = def else { return }
         d.source = draftSource
         Task { @MainActor in
-            await workspace.engine.updateCustomInstrument(d)
+            await engine.updateCustomInstrument(d)
             isDirty = false
             showSavedCheck = true
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -106,7 +106,7 @@ struct CustomInstrumentEditorView: View {
 
 struct CustomInstrumentFeaturesPopover: View {
     let def: CustomInstrumentDef
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Environment(\.dismiss) private var dismiss
 
     @State private var draftFeatures: [CustomInstrumentDef.Feature] = []
@@ -273,7 +273,7 @@ struct CustomInstrumentFeaturesPopover: View {
         var updated = def
         updated.features = draftFeatures
         Task { @MainActor in
-            await workspace.engine.updateCustomInstrument(updated)
+            await engine.updateCustomInstrument(updated)
             dismiss()
         }
     }

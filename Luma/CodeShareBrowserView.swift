@@ -5,7 +5,7 @@ import LumaCore
 
 struct CodeShareBrowserView: View {
     let session: LumaCore.ProcessSession
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let onInstrumentAdded: ((LumaCore.InstrumentInstance) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -156,7 +156,7 @@ struct CodeShareBrowserView: View {
         if let project = selectedProject {
             CodeShareProjectDetailView(
                 project: project,
-                workspace: workspace,
+                engine: engine,
                 session: session,
                 registerAddAction: { handler in
                     addInstrumentHandler = handler
@@ -219,7 +219,7 @@ struct CodeShareBrowserView: View {
 
 struct CodeShareProjectDetailView: View {
     let project: CodeShareService.ProjectSummary
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let session: LumaCore.ProcessSession
     let registerAddAction: (((() -> Void)?) -> Void)
     @Binding var isAddingInstrument: Bool
@@ -258,7 +258,7 @@ struct CodeShareProjectDetailView: View {
                         text: $source,
                         profile: EditorProfile.fridaCodeShare(),
                         introspector: monacoIntrospector,
-                        workspace: workspace,
+                        engine: engine,
                     )
                 }
             } else if isLoadingDetails {
@@ -383,10 +383,10 @@ struct CodeShareProjectDetailView: View {
             makeInitialConfigJSON: { configData }
         )
 
-        workspace.engine.registerDescriptor(descriptor)
+        engine.registerDescriptor(descriptor)
         InstrumentUIRegistry.shared.register(for: descriptor.id, ui: CodeShareUI())
 
-        let newInstrument = await workspace.engine.addInstrument(
+        let newInstrument = await engine.addInstrument(
             kind: descriptor.kind,
             sourceIdentifier: descriptor.sourceIdentifier,
             configJSON: configData,

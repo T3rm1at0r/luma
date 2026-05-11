@@ -10,6 +10,7 @@ public final class ProjectStore: Sendable {
     public init(path: String) throws {
         var config = Configuration()
         config.foreignKeysEnabled = true
+        config.busyMode = .timeout(5)
         db = try DatabaseQueue(path: path, configuration: config)
         try db.write(Self.createSchema)
 

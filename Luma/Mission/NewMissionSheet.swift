@@ -2,7 +2,7 @@ import LumaCore
 import SwiftUI
 
 struct NewMissionSheet: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var isPresented: Bool
     var onCreated: (Mission) -> Void
 
@@ -25,8 +25,8 @@ struct NewMissionSheet: View {
     @State private var modelsErrorIsMissingKey = false
     @State private var apiKeyDebounce: Task<Void, Never>?
 
-    init(workspace: Workspace, isPresented: Binding<Bool>, onCreated: @escaping (Mission) -> Void) {
-        self.workspace = workspace
+    init(engine: Engine, isPresented: Binding<Bool>, onCreated: @escaping (Mission) -> Void) {
+        self.engine = engine
         self._isPresented = isPresented
         self.onCreated = onCreated
         let defaults = LumaAppState.shared.missionDefaults
@@ -56,7 +56,7 @@ struct NewMissionSheet: View {
 
                 Section("Model") {
                     Picker("Provider", selection: $selectedProviderID) {
-                        ForEach(workspace.engine.llmRegistry.descriptors(), id: \.id) { d in
+                        ForEach(engine.llmRegistry.descriptors(), id: \.id) { d in
                             Text(d.displayName).tag(d.id)
                         }
                     }
@@ -146,7 +146,7 @@ struct NewMissionSheet: View {
         .onChange(of: hasStoredAPIKey) { _, _ in Task { await refreshModels() } }
         .onChange(of: apiKey) { _, _ in scheduleAPIKeyRefresh() }
         .onChange(of: selectedProviderID) { _, _ in
-            let descriptor = workspace.engine.llmRegistry.provider(id: selectedProviderID)?.descriptor
+            let descriptor = engine.llmRegistry.provider(id: selectedProviderID)?.descriptor
             selectedModelID = descriptor?.defaultModelID ?? selectedModelID
             if let options = descriptor?.capabilities.reasoningEffortOptions, !options.contains(reasoningEffort) {
                 reasoningEffort = descriptor?.capabilities.defaultReasoningEffort ?? options.first ?? "auto"
@@ -155,12 +155,12 @@ struct NewMissionSheet: View {
     }
 
     private var currentProviderSupportsCustomBaseURL: Bool {
-        workspace.engine.llmRegistry.provider(id: selectedProviderID)?
+        engine.llmRegistry.provider(id: selectedProviderID)?
             .descriptor.capabilities.supportsCustomBaseURL ?? false
     }
 
     private var baseURLPlaceholder: String {
-        let fallback = workspace.engine.llmRegistry.provider(id: selectedProviderID)?
+        let fallback = engine.llmRegistry.provider(id: selectedProviderID)?
             .descriptor.defaultBaseURL.absoluteString ?? ""
         return "Base URL (default: \(fallback))"
     }
@@ -176,22 +176,22 @@ struct NewMissionSheet: View {
     }
 
     private var currentProviderDisplayName: String {
-        workspace.engine.llmRegistry.provider(id: selectedProviderID)?
+        engine.llmRegistry.provider(id: selectedProviderID)?
             .descriptor.displayName ?? selectedProviderID
     }
 
     private var currentProviderRequiresKey: Bool {
-        workspace.engine.llmRegistry.provider(id: selectedProviderID)?
+        engine.llmRegistry.provider(id: selectedProviderID)?
             .descriptor.capabilities.requiresAPIKey ?? false
     }
 
     private var currentProviderSupportsThinking: Bool {
-        workspace.engine.llmRegistry.provider(id: selectedProviderID)?
+        engine.llmRegistry.provider(id: selectedProviderID)?
             .descriptor.capabilities.supportsThinking ?? false
     }
 
     private var reasoningEffortOptions: [String] {
-        workspace.engine.llmRegistry.provider(id: selectedProviderID)?
+        engine.llmRegistry.provider(id: selectedProviderID)?
             .descriptor.capabilities.reasoningEffortOptions ?? []
     }
 
@@ -220,7 +220,7 @@ struct NewMissionSheet: View {
         checkingAPIKey = true
         defer { checkingAPIKey = false }
         do {
-            let stored = try await workspace.engine.llmCredentials.apiKey(providerID: selectedProviderID)
+            let stored = try await engine.llmCredentials.apiKey(providerID: selectedProviderID)
             hasStoredAPIKey = (stored?.isEmpty == false)
         } catch {
             hasStoredAPIKey = false
@@ -238,7 +238,7 @@ struct NewMissionSheet: View {
     }
 
     private func refreshModels() async {
-        guard let provider = workspace.engine.llmRegistry.provider(id: selectedProviderID) else {
+        guard let provider = engine.llmRegistry.provider(id: selectedProviderID) else {
             availableModels = []
             modelsError = nil
             modelsErrorIsMissingKey = false
@@ -250,7 +250,7 @@ struct NewMissionSheet: View {
         modelsErrorIsMissingKey = false
         defer { modelsLoading = false }
         do {
-            let storedKey = (try? await workspace.engine.llmCredentials.apiKey(providerID: providerID)) ?? nil
+            let storedKey = (try? await engine.llmCredentials.apiKey(providerID: providerID)) ?? nil
             let typedKey = apiKey
             let effectiveKey = !typedKey.isEmpty ? typedKey : storedKey
             let models = try await provider.suggestedModels(apiKey: effectiveKey, baseURL: effectiveBaseURL)
@@ -260,7 +260,7 @@ struct NewMissionSheet: View {
                 selectedModelID = provider.descriptor.defaultModelID ?? models.first?.id ?? selectedModelID
             }
             if !typedKey.isEmpty, !hasStoredAPIKey {
-                try? await workspace.engine.llmCredentials.setAPIKey(typedKey, providerID: providerID)
+                try? await engine.llmCredentials.setAPIKey(typedKey, providerID: providerID)
                 guard selectedProviderID == providerID else { return }
                 hasStoredAPIKey = true
                 apiKey = ""
@@ -291,12 +291,12 @@ struct NewMissionSheet: View {
         defer { isStarting = false }
 
         if !hasStoredAPIKey, !apiKey.isEmpty {
-            try? await workspace.engine.llmCredentials.setAPIKey(apiKey, providerID: selectedProviderID)
+            try? await engine.llmCredentials.setAPIKey(apiKey, providerID: selectedProviderID)
         }
 
         rememberDefaults()
 
-        let mission = workspace.engine.startMission(
+        let mission = engine.startMission(
             goal: goalText,
             providerID: selectedProviderID,
             modelID: selectedModelID,

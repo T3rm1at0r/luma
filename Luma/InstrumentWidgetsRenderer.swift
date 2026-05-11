@@ -4,7 +4,7 @@ import SwiftUI
 
 struct InstrumentWidgetsRenderer: View {
     let widgets: [InstrumentWidget]
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Environment(\.instrumentInstance) private var instance: LumaCore.InstrumentInstance?
 
     var body: some View {
@@ -14,7 +14,7 @@ struct InstrumentWidgetsRenderer: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(widgets) { widget in
                     GroupBox {
-                        WidgetCanvas(widget: widget, instance: instance, workspace: workspace)
+                        WidgetCanvas(widget: widget, instance: instance, engine: engine)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } label: {
                         widgetHeader(widget: widget)
@@ -30,7 +30,7 @@ struct InstrumentWidgetsRenderer: View {
             Spacer()
             if let instance {
                 Button {
-                    workspace.engine.clearWidget(instance: instance, widget: widget.id)
+                    engine.clearWidget(instance: instance, widget: widget.id)
                 } label: {
                     Label("Clear", systemImage: "trash")
                         .labelStyle(.iconOnly)
@@ -45,7 +45,7 @@ struct InstrumentWidgetsRenderer: View {
 private struct WidgetCanvas: View {
     let widget: InstrumentWidget
     let instance: LumaCore.InstrumentInstance?
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     @State private var state = WidgetState()
 
@@ -246,7 +246,7 @@ private struct WidgetCanvas: View {
 
     private func invoke(action: String, item: String) {
         guard let instance else { return }
-        let engine = workspace.engine
+        let engine = engine
         Task { @MainActor in
             await engine.invokeWidgetAction(instance: instance, widget: widget.id, action: action, item: item)
         }
@@ -257,7 +257,7 @@ private struct WidgetCanvas: View {
         guard let instance else { return }
         let widgetID = widget.id
         let instanceID = instance.id
-        let engine = workspace.engine
+        let engine = engine
         state = engine.widgetState(instanceID: instanceID, widget: widgetID)
         for await update in engine.widgetUpdates
         where update.instanceID == instanceID && update.widget == widgetID {

@@ -11,7 +11,7 @@ import UIKit
 #endif
 
 struct CollaborationPanel: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     @State private var didCopyInvite = false
     @State private var showLeaveLabConfirmation = false
@@ -28,7 +28,7 @@ struct CollaborationPanel: View {
     #endif
 
     private var collaboration: CollaborationSession {
-        workspace.engine.collaboration
+        engine.collaboration
     }
 
     private var isActive: Bool {
@@ -56,11 +56,11 @@ struct CollaborationPanel: View {
         .background(.ultraThickMaterial)
         .sheet(
             isPresented: Binding(
-                get: { workspace.engine.gitHubAuth.isPresentingSignIn },
-                set: { if !$0 { workspace.engine.gitHubAuth.dismissSignIn() } }
+                get: { engine.gitHubAuth.isPresentingSignIn },
+                set: { if !$0 { engine.gitHubAuth.dismissSignIn() } }
             )
         ) {
-            GitHubSignInSheet(auth: workspace.engine.gitHubAuth)
+            GitHubSignInSheet(auth: engine.gitHubAuth)
         }
         .onAppear {
             if case .joined = collaboration.status {
@@ -70,7 +70,7 @@ struct CollaborationPanel: View {
         .alert("Leave this lab?", isPresented: $showLeaveLabConfirmation) {
             Button("Leave", role: .destructive) {
                 Task { @MainActor in
-                    await workspace.engine.collaboration.leaveLab()
+                    await engine.collaboration.leaveLab()
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -85,15 +85,15 @@ struct CollaborationPanel: View {
             Text("Collaboration")
                 .font(.headline)
             Spacer()
-            if let user = workspace.engine.gitHubAuth.currentUser {
+            if let user = engine.gitHubAuth.currentUser {
                 Menu {
                     Button("View GitHub Profile") {
                         openGitHubProfile(for: user)
                     }
                     Button("Sign out", role: .destructive) {
                         Task { @MainActor in
-                            await workspace.engine.gitHubAuth.signOut()
-                            await workspace.engine.collaboration.stop()
+                            await engine.gitHubAuth.signOut()
+                            await engine.collaboration.stop()
                         }
                     }
                 } label: {
@@ -109,7 +109,7 @@ struct CollaborationPanel: View {
             }
 
             Button {
-                workspace.isCollaborationPanelVisible = false
+                engine.setCollaborationPanelVisible(false)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14))
@@ -127,7 +127,7 @@ struct CollaborationPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             switch collaboration.status {
             case .disconnected:
-                let storedLabID = (try? workspace.store.fetchCollaborationState())?.labID
+                let storedLabID = (try? engine.store.fetchCollaborationState())?.labID
                 let hasExistingLab = storedLabID != nil
                 if let stored = storedLabID {
                     Text("You're currently offline from the shared lab (lab \(truncatedLabID(stored))).")
@@ -151,13 +151,13 @@ struct CollaborationPanel: View {
                     if hasExistingLab {
                         return "Reconnect"
                     }
-                    if let user = workspace.engine.gitHubAuth.currentUser {
+                    if let user = engine.gitHubAuth.currentUser {
                         return "Enable collaboration as @\(user.id)"
                     }
                     return "Enable collaboration"
                 }()
                 Button(actionLabel) {
-                    workspace.engine.startCollaboration()
+                    engine.startCollaboration()
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("collaboration.enable")
@@ -252,7 +252,7 @@ struct CollaborationPanel: View {
                     .foregroundStyle(.yellow)
 
                 Button("Retry") {
-                    workspace.engine.startCollaboration()
+                    engine.startCollaboration()
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("collaboration.retry")
@@ -274,7 +274,7 @@ struct CollaborationPanel: View {
             }
             Button("Disconnect from lab") {
                 Task { @MainActor in
-                    await workspace.engine.collaboration.stop()
+                    await engine.collaboration.stop()
                 }
             }
         } label: {
@@ -455,7 +455,7 @@ struct CollaborationPanel: View {
             }
             .frame(minHeight: 80)
 
-            ChatInputRow(workspace: workspace, isFocused: $focusChatField)
+            ChatInputRow(engine: engine, isFocused: $focusChatField)
                 .onChange(of: focusChatField) { _, newVal in
                     if newVal {
                         isPinnedToBottom = true
@@ -523,13 +523,13 @@ struct CollaborationPanel: View {
 }
 
 private struct ChatInputRow: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var isFocused: Bool
     @State private var draft: String = ""
     @FocusState private var textFieldFocused: Bool
 
     private var collaboration: CollaborationSession {
-        workspace.engine.collaboration
+        engine.collaboration
     }
 
     private var isActive: Bool {

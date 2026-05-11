@@ -6,7 +6,7 @@ struct HookPackUI: InstrumentUI {
 
     func makeConfigEditor(
         configJSON: Binding<Data>,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) -> AnyView {
         let cfgBinding = Binding<HookPackConfig>(
@@ -25,14 +25,14 @@ struct HookPackUI: InstrumentUI {
             HookPackConfigView(
                 pack: pack,
                 config: cfgBinding,
-                workspace: workspace
+                engine: engine
             )
         )
     }
 
     func renderEvent(
         _ event: RuntimeEvent,
-        workspace: Workspace,
+        engine: Engine,
         selection: Binding<SidebarItemID?>
     ) -> AnyView {
         guard case .jsValue(let v) = event.payload else {
@@ -43,7 +43,7 @@ struct HookPackUI: InstrumentUI {
             JSInspectValueView(
                 value: v,
                 sessionID: event.sessionID ?? UUID(),
-                workspace: workspace,
+                engine: engine,
                 selection: selection
             )
             .font(.system(.footnote, design: .monospaced))

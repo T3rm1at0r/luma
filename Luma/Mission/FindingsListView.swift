@@ -2,7 +2,7 @@ import LumaCore
 import SwiftUI
 
 struct FindingsListView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let missionID: UUID
     let findings: [MissionFinding]
 
@@ -33,7 +33,7 @@ struct FindingsListView: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         ForEach(findings) { finding in
-                            FindingCard(workspace: workspace, finding: finding)
+                            FindingCard(engine: engine, finding: finding)
                         }
                     }
                     .padding(.horizontal)
@@ -46,7 +46,7 @@ struct FindingsListView: View {
 }
 
 private struct FindingCard: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let finding: MissionFinding
 
     @State private var evidence: [MissionEvidence] = []
@@ -85,21 +85,21 @@ private struct FindingCard: View {
                     }
                 }
                 if finding.status == .proposed {
-                    Button("Refute") { workspace.engine.refuteFinding(findingID: finding.id) }
-                    Button("Accept") { workspace.engine.acceptFinding(findingID: finding.id) }.buttonStyle(.borderedProminent)
+                    Button("Refute") { engine.refuteFinding(findingID: finding.id) }
+                    Button("Accept") { engine.acceptFinding(findingID: finding.id) }.buttonStyle(.borderedProminent)
                 }
             }
         }
         .padding()
         .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .task(id: finding.id) {
-            evidence = (try? workspace.store.fetchMissionEvidence(findingID: finding.id)) ?? []
+            evidence = (try? engine.store.fetchMissionEvidence(findingID: finding.id)) ?? []
         }
     }
 
     private func addFindingToNotebook() {
         let processName = finding.sessionID.flatMap { sid in
-            workspace.engine.sessions.first(where: { $0.id == sid })?.processName
+            engine.sessions.first(where: { $0.id == sid })?.processName
         }
         let entry = NotebookEntry(
             kind: .note,
@@ -108,7 +108,7 @@ private struct FindingCard: View {
             sessionID: finding.sessionID,
             processName: processName
         )
-        workspace.engine.addNotebookEntry(entry)
+        engine.addNotebookEntry(entry)
     }
 
     private func iconForKind(_ kind: MissionEvidenceKind) -> String {

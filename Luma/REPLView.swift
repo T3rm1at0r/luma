@@ -4,7 +4,7 @@ import LumaCore
 
 struct REPLView: View {
     let sessionID: UUID
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     @State private var inputCode: String = ""
@@ -17,19 +17,19 @@ struct REPLView: View {
     @State private var cellsObservation: StoreObservation?
 
     private var session: LumaCore.ProcessSession? {
-        workspace.engine.sessions.first { $0.id == sessionID }
+        engine.sessions.first { $0.id == sessionID }
     }
 
     private var node: LumaCore.ProcessNode? {
-        workspace.engine.node(forSessionID: sessionID)
+        engine.node(forSessionID: sessionID)
     }
 
     private var localUserIsDriver: Bool {
-        workspace.engine.localUserIsDriver(ofSessionID: sessionID)
+        engine.localUserIsDriver(ofSessionID: sessionID)
     }
 
     private var driver: LumaCore.CollaborationSession.UserInfo? {
-        workspace.engine.driver(forSessionID: sessionID)
+        engine.driver(forSessionID: sessionID)
     }
 
     private var orderedCells: [LumaCore.REPLCell] {
@@ -39,7 +39,7 @@ struct REPLView: View {
     private var replInactiveMessage: String {
         guard let session else { return "Session not attached." }
         if case .armed = session.armingState {
-            if workspace.engine.isGatingActive(forDeviceID: session.deviceID) {
+            if engine.isGatingActive(forDeviceID: session.deviceID) {
                 return "Waiting for a matching launch — REPL available once captured."
             }
             return "Armed but inactive — resume spawn gating to capture launches."
@@ -58,7 +58,7 @@ struct REPLView: View {
     private var replInactiveHelp: String {
         guard let session else { return "Session not attached." }
         if case .armed = session.armingState {
-            if workspace.engine.isGatingActive(forDeviceID: session.deviceID) {
+            if engine.isGatingActive(forDeviceID: session.deviceID) {
                 return "REPL becomes available after the next matching launch is captured."
             }
             return "Spawn gating is paused — resume it from the banner above."
@@ -92,7 +92,7 @@ struct REPLView: View {
                                     cell: cell,
                                     processName: session?.processName ?? "",
                                     sessionID: sessionID,
-                                    workspace: workspace,
+                                    engine: engine,
                                     selection: $selection
                                 )
                                 .id(cell.id)
@@ -206,7 +206,7 @@ struct REPLView: View {
         }
         .onAppear {
             if cellsObservation == nil {
-                cellsObservation = workspace.store.observeREPLCells(sessionID: sessionID) { [self] newCells in
+                cellsObservation = engine.store.observeREPLCells(sessionID: sessionID) { [self] newCells in
                     Task { @MainActor in
                         self.cells = newCells
                     }
@@ -232,7 +232,7 @@ struct REPLView: View {
     }
 
     private func reloadCells() {
-        cells = (try? workspace.store.fetchREPLCells(sessionID: sessionID)) ?? []
+        cells = (try? engine.store.fetchREPLCells(sessionID: sessionID)) ?? []
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
@@ -256,7 +256,7 @@ struct REPLView: View {
             return
         }
 
-        if !workspace.engine.localUserHosts(sessionID) {
+        if !engine.localUserHosts(sessionID) {
             let cellID = UUID()
             let placeholder = LumaCore.REPLCell(
                 id: cellID,
@@ -265,8 +265,8 @@ struct REPLView: View {
                 result: .text("Running…"),
                 timestamp: Date()
             )
-            try? workspace.store.save(placeholder)
-            workspace.engine.collaboration.sendReplEvalRequest(
+            try? engine.store.save(placeholder)
+            engine.collaboration.sendReplEvalRequest(
                 sessionID: sessionID,
                 code: code,
                 cellID: cellID
@@ -317,7 +317,7 @@ private struct REPLCellView: View {
     let cell: LumaCore.REPLCell
     let processName: String
     let sessionID: UUID
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     var body: some View {
@@ -369,7 +369,7 @@ private struct REPLCellView: View {
                         JSInspectValueView(
                             value: v,
                             sessionID: sessionID,
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection
                         )
 
@@ -427,7 +427,7 @@ private struct REPLCellView: View {
             entry.jsValue = jsValue
         }
 
-        workspace.engine.addNotebookEntry(entry)
+        engine.addNotebookEntry(entry)
     }
 }
 

@@ -2,7 +2,7 @@ import SwiftUI
 import LumaCore
 
 struct EventStreamView: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
 
     #if canImport(UIKit)
@@ -71,14 +71,14 @@ struct EventStreamView: View {
                         isSearchFocused = false
                     }
                     .onAppear {
-                        syncSnapshotFromWorkspace()
+                        syncSnapshotFromEngine()
                         isPaused = false
                         pendingNewEvents = 0
                         isAtBottom = true
                         scrollToLastToken &+= 1
                     }
-                    .onChange(of: workspace.engine.eventLog.flushVersion) { _, _ in
-                        handleEventVersionChange(workspace.engine.eventLog.totalReceived)
+                    .onChange(of: engine.eventLog.flushVersion) { _, _ in
+                        handleEventVersionChange(engine.eventLog.totalReceived)
                     }
                     .onChange(of: scrollToLastToken) { _, _ in
                         guard let last = filteredEvents.last else { return }
@@ -245,7 +245,7 @@ struct EventStreamView: View {
     private var overflowMenu: some View {
         Menu {
             Button(role: .destructive) {
-                workspace.engine.clearEventLog()
+                engine.clearEventLog()
                 resetAllEventState()
                 isPaused = false
                 isAtBottom = true
@@ -269,7 +269,7 @@ struct EventStreamView: View {
                     EventRow(
                         evt: evt,
                         previousTimestamp: previousTimestamp,
-                        workspace: workspace,
+                        engine: engine,
                         selection: $selection
                     ) {
                         pin(evt)
@@ -328,16 +328,16 @@ struct EventStreamView: View {
         lastEventsVersion = 0
     }
 
-    private func syncSnapshotFromWorkspace() {
-        displayedEvents = workspace.events
-        lastEventsVersion = workspace.engine.eventLog.totalReceived
+    private func syncSnapshotFromEngine() {
+        displayedEvents = engine.eventLog.events
+        lastEventsVersion = engine.eventLog.totalReceived
         rebuildFilteredEvents()
     }
 
     private func goLiveAndScrollToBottom() {
         isPaused = false
         pendingNewEvents = 0
-        syncSnapshotFromWorkspace()
+        syncSnapshotFromEngine()
         isAtBottom = true
         scrollToLastToken &+= 1
     }
@@ -367,14 +367,14 @@ struct EventStreamView: View {
             goLiveAndScrollToBottom()
         } else {
             isPaused = true
-            syncSnapshotFromWorkspace()
+            syncSnapshotFromEngine()
         }
     }
 
     private func pauseFromRow() {
         guard !isPaused else { return }
         isPaused = true
-        syncSnapshotFromWorkspace()
+        syncSnapshotFromEngine()
     }
 
     private func handleEventVersionChange(_ newVersion: Int) {
@@ -393,7 +393,7 @@ struct EventStreamView: View {
 
         lastEventsVersion = newVersion
         if isAtBottom {
-            syncSnapshotFromWorkspace()
+            syncSnapshotFromEngine()
             pendingNewEvents = 0
             scrollToLastToken &+= 1
         } else {
@@ -451,7 +451,7 @@ struct EventStreamView: View {
     private func pin(_ evt: RuntimeEvent) {
         let (processName, title) = prettyContext(evt)
 
-        workspace.engine.addNotebookEntry(
+        engine.addNotebookEntry(
             LumaCore.NotebookEntry(
                 title: title,
                 details: prettyPayload(evt),
@@ -462,11 +462,11 @@ struct EventStreamView: View {
     }
 
     private func processName(for evt: RuntimeEvent) -> String {
-        workspace.engine.session(id: evt.sessionID ?? UUID())?.processName ?? ""
+        engine.session(id: evt.sessionID ?? UUID())?.processName ?? ""
     }
 
     private func prettyContext(_ evt: RuntimeEvent) -> (process: String?, title: String) {
-        let processName = workspace.engine.session(id: evt.sessionID ?? UUID())?.processName ?? ""
+        let processName = engine.session(id: evt.sessionID ?? UUID())?.processName ?? ""
         switch evt.source {
         case .processOutput(let fd):
             let channel: String = {
@@ -510,8 +510,8 @@ struct EventStreamView: View {
             return String(describing: evt.payload)
 
         case .instrument:
-            if let instrument = workspace.instrument(for: evt) {
-                return workspace.engine.descriptor(for: instrument).summarizeEvent(evt)
+            if let instrument = engine.instrument(forEvent: evt) {
+                return engine.descriptor(for: instrument).summarizeEvent(evt)
             }
             return String(describing: evt.payload)
 
@@ -636,7 +636,7 @@ private struct EmptyStateView: View {
 struct EventRow: View {
     let evt: RuntimeEvent
     let previousTimestamp: Date?
-    let workspace: Workspace
+    let engine: Engine
     @Binding var selection: SidebarItemID?
     let pinAction: () -> Void
 
@@ -668,7 +668,7 @@ struct EventRow: View {
 
             Spacer(minLength: 8)
 
-            EventSourceBadge(evt: evt, workspace: workspace)
+            EventSourceBadge(evt: evt, engine: engine)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
@@ -800,7 +800,7 @@ struct EventRow: View {
                         JSInspectValueView(
                             value: value,
                             sessionID: evt.sessionID ?? UUID(),
-                            workspace: workspace,
+                            engine: engine,
                             selection: $selection
                         )
                         .font(.system(.footnote, design: .monospaced))
@@ -825,29 +825,29 @@ struct EventRow: View {
     }
 
     private var instrumentEventView: AnyView? {
-        guard let instrument = workspace.instrument(for: evt),
+        guard let instrument = engine.instrument(forEvent: evt),
             let ui = InstrumentUIRegistry.shared.ui(for: instrument)
         else {
             return nil
         }
 
-        return ui.renderEvent(evt, workspace: workspace, selection: $selection)
+        return ui.renderEvent(evt, engine: engine, selection: $selection)
     }
 
     private var instrumentMenuItems: [InstrumentEventMenuItem] {
-        guard let instrument = workspace.instrument(for: evt),
+        guard let instrument = engine.instrument(forEvent: evt),
             let ui = InstrumentUIRegistry.shared.ui(for: instrument)
         else {
             return []
         }
 
-        return ui.makeEventContextMenuItems(evt, workspace: workspace, selection: $selection)
+        return ui.makeEventContextMenuItems(evt, engine: engine, selection: $selection)
     }
 }
 
 private struct EventSourceBadge: View {
     let evt: RuntimeEvent
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
 
     var body: some View {
         Text(labelText)
@@ -860,7 +860,7 @@ private struct EventSourceBadge: View {
     }
 
     private var processName: String {
-        workspace.engine.session(id: evt.sessionID ?? UUID())?.processName ?? ""
+        engine.session(id: evt.sessionID ?? UUID())?.processName ?? ""
     }
 
     private var labelText: String {
@@ -885,7 +885,7 @@ private struct EventSourceBadge: View {
             return "\(processName) • REPL"
 
         case .instrument:
-            let name = workspace.instrument(for: evt).map { workspace.engine.descriptor(for: $0).displayName } ?? "Instrument"
+            let name = engine.instrument(forEvent: evt).map { engine.descriptor(for: $0).displayName } ?? "Instrument"
             return "\(name) • \(processName)"
 
         case .spawnGating(_, let deviceName, _, _, let outcome):

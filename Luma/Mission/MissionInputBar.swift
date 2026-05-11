@@ -2,7 +2,7 @@ import LumaCore
 import SwiftUI
 
 struct MissionInputBar: View {
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let mission: Mission
 
     @State private var draft: String = ""
@@ -56,9 +56,9 @@ struct MissionInputBar: View {
         let text = trimmedDraft
         guard !text.isEmpty else { return }
         if interrupt {
-            workspace.engine.sendMissionUserMessageNow(missionID: mission.id, text: text)
+            engine.sendMissionUserMessageNow(missionID: mission.id, text: text)
         } else {
-            workspace.engine.appendMissionUserMessage(missionID: mission.id, text: text)
+            engine.appendMissionUserMessage(missionID: mission.id, text: text)
         }
         draft = ""
         isFocused = true

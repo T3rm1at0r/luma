@@ -6,47 +6,73 @@ import SwiftUI
 import UIKit
 
 struct PhoneMainView: View {
-    @StateObject private var workspace: Workspace
-
-    @State private var path: [PhoneRoute] = []
-
-    @State private var activeDrawer: DrawerKind?
-
-    @State private var eventsBaseline: Int = 0
-    @State private var collabChatBaseline: Int = 0
-
     private let projectURL: URL
     private let documentActions: PhoneDocumentActions
+
+    @State private var engineResult: Result<Engine, any Swift.Error>
+    @State private var picker = TargetPicker()
 
     init(projectURL: URL, documentActions: PhoneDocumentActions = .noop) {
         self.projectURL = projectURL
         self.documentActions = documentActions
-
-        let fm = FileManager.default
-        let dbURL = projectURL.appendingPathComponent("db.sqlite")
-        let tracesURL = projectURL.appendingPathComponent("traces", isDirectory: true)
-        let eventsURL = projectURL.appendingPathComponent("events", isDirectory: true)
-        try? fm.createDirectory(at: projectURL, withIntermediateDirectories: true)
-        try? fm.createDirectory(at: tracesURL, withIntermediateDirectories: true)
-
-        let store = try! ProjectStore(path: dbURL.path)
-        let traces = try! TraceStore(directory: tracesURL)
-        let eventStore = try? EventStore(directory: eventsURL)
-        self._workspace = StateObject(
-            wrappedValue: Workspace(store: store, traces: traces, eventStore: eventStore, gitHubAuth: sharedGitHubAuth())
-        )
+        let result: Result<Engine, any Swift.Error>
+        do {
+            let engine = try EngineRegistry.shared.engine(
+                for: projectURL,
+                dataDirectory: LumaAppPaths.shared.dataDirectory,
+                gitHubAuth: sharedGitHubAuth()
+            )
+            result = .success(engine)
+        } catch {
+            result = .failure(error)
+        }
+        self._engineResult = State(initialValue: result)
     }
+
+    var body: some View {
+        switch engineResult {
+        case .success(let engine):
+            PhoneContentView(
+                engine: engine,
+                picker: picker,
+                projectURL: projectURL,
+                documentActions: documentActions
+            )
+        case .failure(let error):
+            VStack(spacing: 12) {
+                Text("Failed to open project")
+                    .font(.title3)
+                Text(error.localizedDescription)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+        }
+    }
+}
+
+private struct PhoneContentView: View {
+    let engine: Engine
+    let picker: TargetPicker
+    let projectURL: URL
+    let documentActions: PhoneDocumentActions
+
+    @State private var path: [PhoneRoute] = []
+    @State private var activeDrawer: DrawerKind?
+    @State private var eventsBaseline: Int = 0
+    @State private var collabChatBaseline: Int = 0
 
     var body: some View {
         DrawerHost(
             active: $activeDrawer,
-            workspace: workspace,
-            onEventsOpened: { eventsBaseline = workspace.engine.eventLog.totalReceived },
-            onCollabOpened: { collabChatBaseline = workspace.engine.collaboration.chatMessages.count }
+            engine: engine,
+            onEventsOpened: { eventsBaseline = engine.eventLog.totalReceived },
+            onCollabOpened: { collabChatBaseline = engine.collaboration.chatMessages.count }
         ) {
             NavigationStack(path: $path) {
                 PhoneSessionsListView(
-                    workspace: workspace,
+                    engine: engine,
                     path: $path,
                     activeDrawer: $activeDrawer,
                     eventsIndicator: eventsIndicator,
@@ -58,7 +84,7 @@ struct PhoneMainView: View {
                     case .session(let id):
                         PhoneSessionView(
                             sessionID: id,
-                            workspace: workspace,
+                            engine: engine,
                             path: $path,
                             activeDrawer: $activeDrawer,
                             eventsIndicator: eventsIndicator,
@@ -66,14 +92,14 @@ struct PhoneMainView: View {
                         )
 
                     case .instrument(let sessionID, let instrumentID):
-                        if workspace.engine.instrumentsBySession[sessionID]?
+                        if engine.instrumentsBySession[sessionID]?
                             .contains(where: { $0.id == instrumentID }) == true
                         {
-                            SessionContent(sessionID: sessionID, workspace: workspace) {
+                            SessionContent(sessionID: sessionID, engine: engine) {
                                 InstrumentDetailView(
                                     instanceID: instrumentID,
                                     sessionID: sessionID,
-                                    workspace: workspace,
+                                    engine: engine,
                                     selection: $path.asSidebarSelection()
                                 )
                             }
@@ -82,15 +108,15 @@ struct PhoneMainView: View {
                         }
 
                     case .insight(let sessionID, let insightID):
-                        if let session = workspace.engine.sessions.first(where: { $0.id == sessionID }),
-                           let insight = workspace.engine.insightsBySession[sessionID]?
+                        if let session = engine.sessions.first(where: { $0.id == sessionID }),
+                           let insight = engine.insightsBySession[sessionID]?
                                .first(where: { $0.id == insightID })
                         {
-                            SessionContent(sessionID: sessionID, workspace: workspace) {
+                            SessionContent(sessionID: sessionID, engine: engine) {
                                 AddressInsightDetailView(
                                     session: session,
                                     insight: insight,
-                                    workspace: workspace,
+                                    engine: engine,
                                     selection: $path.asSidebarSelection()
                                 )
                             }
@@ -100,15 +126,15 @@ struct PhoneMainView: View {
                         }
 
                     case .trace(let sessionID, let traceID):
-                        if let session = workspace.engine.sessions.first(where: { $0.id == sessionID }),
-                           let trace = workspace.engine.tracesBySession[sessionID]?
+                        if let session = engine.sessions.first(where: { $0.id == sessionID }),
+                           let trace = engine.tracesBySession[sessionID]?
                                .first(where: { $0.id == traceID })
                         {
-                            SessionContent(sessionID: sessionID, workspace: workspace) {
+                            SessionContent(sessionID: sessionID, engine: engine) {
                                 ITraceDetailView(
                                     trace: trace,
                                     session: session,
-                                    workspace: workspace,
+                                    engine: engine,
                                     selection: $path.asSidebarSelection()
                                 )
                             }
@@ -120,17 +146,22 @@ struct PhoneMainView: View {
                 }
             }
         }
+        .environment(picker)
         .task {
-            await workspace.configurePersistence()
-            eventsBaseline = workspace.engine.eventLog.totalReceived
-            collabChatBaseline = workspace.engine.collaboration.chatMessages.count
+            await EngineRegistry.shared.startIfNeeded(for: projectURL)
+            engine.attachInstrumentUIs()
+            if engine.collaboration.isCollaborative {
+                engine.setCollaborationPanelVisible(true)
+            }
+            eventsBaseline = engine.eventLog.totalReceived
+            collabChatBaseline = engine.collaboration.chatMessages.count
         }
         .onAppear {
             LumaAppState.shared.lastDocumentPath = projectURL.path
         }
         .onDisappear {
             Task { @MainActor in
-                await workspace.engine.collaboration.stop()
+                await engine.collaboration.stop()
             }
         }
         .onOpenURL { url in
@@ -155,11 +186,11 @@ struct PhoneMainView: View {
     }
 
     private var eventsIndicator: Bool {
-        workspace.engine.eventLog.totalReceived > eventsBaseline && activeDrawer != .events
+        engine.eventLog.totalReceived > eventsBaseline && activeDrawer != .events
     }
 
     private var collabIndicator: Bool {
-        workspace.engine.collaboration.chatMessages.count > collabChatBaseline && activeDrawer != .collab
+        engine.collaboration.chatMessages.count > collabChatBaseline && activeDrawer != .collab
     }
 }
 
@@ -199,7 +230,7 @@ enum DrawerKind: Hashable {
 
 private struct DrawerHost<Content: View>: View {
     @Binding var active: DrawerKind?
-    @ObservedObject var workspace: Workspace
+    let engine: Engine
     let onEventsOpened: () -> Void
     let onCollabOpened: () -> Void
     @ViewBuilder let content: () -> Content
@@ -285,13 +316,13 @@ private struct DrawerHost<Content: View>: View {
             switch kind {
             case .events:
                 EventStreamView(
-                    workspace: workspace,
+                    engine: engine,
                     selection: .constant(nil),
                     onCollapseRequested: close
                 )
 
             case .collab:
-                CollaborationPanel(workspace: workspace)
+                CollaborationPanel(engine: engine)
             }
         }
     }
