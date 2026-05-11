@@ -27,8 +27,8 @@ public final class GitHubAuth {
     public var isPresentingSignIn: Bool = false
 
     private let clientID = "Ov23lij2uZMOQCj4TMkv"
-    private let service = "re.frida.Luma"
-    private let account = "github"
+    private let service = "github"
+    private let account = "default"
     private let tokenStore: TokenStore
     private var signInTask: Task<Void, Never>?
     private var pendingTokenWaiters: [CheckedContinuation<String?, Never>] = []

@@ -8,18 +8,14 @@ public struct LLMCredentialStore: Sendable {
     }
 
     public func apiKey(providerID: String, account: String = "default") async throws -> String? {
-        try await backing.get(service: serviceName(for: providerID), account: account)
+        try await backing.get(service: providerID, account: account)
     }
 
     public func setAPIKey(_ key: String, providerID: String, account: String = "default") async throws {
-        try await backing.set(service: serviceName(for: providerID), account: account, token: key)
+        try await backing.set(service: providerID, account: account, token: key)
     }
 
     public func deleteAPIKey(providerID: String, account: String = "default") async throws {
-        try await backing.delete(service: serviceName(for: providerID), account: account)
-    }
-
-    private func serviceName(for providerID: String) -> String {
-        "luma.llm.\(providerID)"
+        try await backing.delete(service: providerID, account: account)
     }
 }

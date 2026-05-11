@@ -73,7 +73,8 @@ public struct FileTokenStore: TokenStore {
     }
 
     private func fileURL(service: String, account: String) -> URL {
-        directory.appendingPathComponent("\(service).\(account).token")
+        let name = account == "default" ? service : "\(service).\(account)"
+        return directory.appendingPathComponent(name)
     }
 
     public func get(service: String, account: String) async throws -> String? {
@@ -108,6 +109,6 @@ public func defaultTokenStore(dataDirectory: URL) -> TokenStore {
     #if os(iOS) || os(visionOS)
     return KeychainTokenStore()
     #else
-    return FileTokenStore(directory: dataDirectory.appendingPathComponent("tokens"))
+    return FileTokenStore(directory: dataDirectory.appendingPathComponent("Tokens"))
     #endif
 }
