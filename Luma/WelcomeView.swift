@@ -84,14 +84,14 @@ struct WelcomeView: View {
         VStack(spacing: 10) {
             ActionRow(
                 title: "New Project",
-                subtitle: "Start with an empty workspace.",
+                subtitle: "Start with an empty workspace",
                 systemImage: "doc.badge.plus",
                 action: onCreateBlank
             )
             .accessibilityIdentifier("welcome.newProject")
             ActionRow(
                 title: "Open Project\u{2026}",
-                subtitle: "Pick a .luma file from disk or iCloud Drive.",
+                subtitle: "Choose a .luma project from disk",
                 systemImage: "folder",
                 action: onOpenExisting
             )

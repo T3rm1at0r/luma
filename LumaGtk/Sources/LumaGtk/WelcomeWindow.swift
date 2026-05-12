@@ -225,14 +225,14 @@ final class WelcomeWindow {
         appendQuickAction(
             iconName: "document-new-symbolic",
             title: "New Project",
-            subtitle: "Start with an empty workspace."
+            subtitle: "Start with an empty workspace"
         ) { [weak self] in
             self?.createBlank()
         }
         appendQuickAction(
             iconName: "document-open-symbolic",
             title: "Open Project\u{2026}",
-            subtitle: "Pick a .luma file from disk."
+            subtitle: "Choose a .luma project from disk"
         ) { [weak self] in
             self?.openExisting()
         }
