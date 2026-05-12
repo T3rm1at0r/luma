@@ -1,8 +1,20 @@
 import Foundation
 import GRDB
 
+public enum ProjectStoreError: Error, LocalizedError {
+    case schemaVersionMismatch(expected: Int, found: Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .schemaVersionMismatch(let expected, let found):
+            return "Project database schema version \(found) does not match expected \(expected). Open with an older build or recreate the project."
+        }
+    }
+}
+
 public final class ProjectStore: Sendable {
     public static let didCommitNotification = Notification.Name("LumaCore.ProjectStore.didCommit")
+    public static let currentSchemaVersion: Int = 1
 
     public let instanceID = UUID()
     private let db: DatabaseQueue
@@ -12,7 +24,7 @@ public final class ProjectStore: Sendable {
         config.foreignKeysEnabled = true
         config.busyMode = .timeout(5)
         db = try DatabaseQueue(path: path, configuration: config)
-        try db.write(Self.createSchema)
+        try db.write(Self.openSchema)
 
         let id = instanceID
         let observer = CommitNotifyingObserver(instanceID: id)
@@ -911,6 +923,28 @@ public final class ProjectStore: Sendable {
     }
 
     // MARK: - Schema
+
+    private static func openSchema(_ db: Database) throws {
+        let userTableCount = try Int.fetchOne(
+            db,
+            sql: "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ) ?? 0
+        let storedVersion = try Int.fetchOne(db, sql: "PRAGMA user_version") ?? 0
+
+        if userTableCount == 0 {
+            try createSchema(db)
+            try db.execute(sql: "PRAGMA user_version = \(currentSchemaVersion)")
+            return
+        }
+
+        guard storedVersion == currentSchemaVersion else {
+            throw ProjectStoreError.schemaVersionMismatch(
+                expected: currentSchemaVersion,
+                found: storedVersion
+            )
+        }
+        try createSchema(db)
+    }
 
     private static func createSchema(_ db: Database) throws {
         try db.create(table: "process_session", ifNotExists: true) { t in
