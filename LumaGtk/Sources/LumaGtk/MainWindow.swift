@@ -1134,6 +1134,7 @@ final class MainWindow {
         ContextMenu.present([
             [
                 .init("Rename & Icon\u{2026}") { [weak self] in self?.presentCustomInstrumentRenameDialog(def: def) },
+                .init("Compatibility\u{2026}") { [weak self] in self?.presentCustomInstrumentCompatibilityDialog(def: def) },
                 .init("Features\u{2026}") { [weak self] in self?.presentCustomInstrumentFeaturesDialog(def: def) },
                 .init("Widgets\u{2026}") { [weak self] in self?.presentCustomInstrumentWidgetsDialog(def: def) },
                 .init("Export as Hookpack\u{2026}") { [weak self] in self?.presentExportHookPackDialog(def: def) },
@@ -1200,6 +1201,11 @@ final class MainWindow {
     private func presentCustomInstrumentRenameDialog(def: LumaCore.CustomInstrumentDef) {
         guard let engine else { return }
         CustomInstrumentRenameDialog(engine: engine, def: def, parentWindow: window).present()
+    }
+
+    private func presentCustomInstrumentCompatibilityDialog(def: LumaCore.CustomInstrumentDef) {
+        guard let engine else { return }
+        CustomInstrumentCompatibilityDialog(engine: engine, def: def).present(parent: window)
     }
 
     private func buildPackagesSection() -> Box {
@@ -1647,24 +1653,48 @@ final class MainWindow {
         guard let engine, let sessionID = currentSessionID() else { return }
         let existing = (try? engine.store.fetchInstruments(sessionID: sessionID)) ?? []
         let disabledDescriptorIDs = Set(existing.map { engine.descriptor(for: $0).id })
-        let dialog = AddInstrumentDialog(
-            parent: window,
-            engine: engine,
-            sessionID: sessionID,
-            descriptors: engine.descriptors,
-            disabledDescriptorIDs: disabledDescriptorIDs,
-            tracerEditor: sharedTracerEditor,
-            codeShareEditor: sharedCodeShareEditor
-        ) { [weak self] instance in
-            guard let self else { return }
-            if instance.kind == .custom, let defID = UUID(uuidString: instance.sourceIdentifier) {
-                self.select(.customInstrumentDef(defID))
-            } else {
-                self.select(.instrument(sessionID: sessionID, instrumentID: instance.id))
+        Task { @MainActor in
+            let incompatibilityReasons = await self.resolveIncompatibilityReasons(
+                engine: engine,
+                sessionID: sessionID
+            )
+            let dialog = AddInstrumentDialog(
+                parent: self.window,
+                engine: engine,
+                sessionID: sessionID,
+                descriptors: engine.descriptors,
+                disabledDescriptorIDs: disabledDescriptorIDs,
+                incompatibilityReasons: incompatibilityReasons,
+                tracerEditor: self.sharedTracerEditor,
+                codeShareEditor: self.sharedCodeShareEditor
+            ) { [weak self] instance in
+                guard let self else { return }
+                if instance.kind == .custom, let defID = UUID(uuidString: instance.sourceIdentifier) {
+                    self.select(.customInstrumentDef(defID))
+                } else {
+                    self.select(.instrument(sessionID: sessionID, instrumentID: instance.id))
+                }
+                self.showToast("Added \(engine.descriptor(for: instance).displayName)")
             }
-            self.showToast("Added \(engine.descriptor(for: instance).displayName)")
+            dialog.present()
         }
-        dialog.present()
+    }
+
+    private func resolveIncompatibilityReasons(
+        engine: Engine,
+        sessionID: UUID
+    ) async -> [String: String] {
+        guard let session = engine.sessions.first(where: { $0.id == sessionID }) else { return [:] }
+        let devices = await engine.deviceManager.currentDevices()
+        guard let device = devices.first(where: { $0.id == session.deviceID }) else { return [:] }
+        guard let params = await engine.systemParameters.parameters(for: device) else { return [:] }
+        var reasons: [String: String] = [:]
+        for descriptor in engine.descriptors {
+            if let reason = descriptor.compatibility.incompatibilityReason(for: params) {
+                reasons[descriptor.id] = reason
+            }
+        }
+        return reasons
     }
 
     func reestablishSession(id: UUID) {
@@ -2031,6 +2061,12 @@ final class MainWindow {
         let ilabel = Label(str: descriptor.displayName)
         ilabel.halign = .start
         rowBox.append(child: ilabel)
+        if let reason = instrumentIncompatibilityReason(for: instrument) {
+            let warning = Gtk.Image(iconName: "dialog-warning-symbolic")
+            warning.pixelSize = 12
+            warning.tooltipText = reason
+            rowBox.append(child: warning)
+        }
         instrumentRowLabels[instrument.id] = ilabel
         instrumentRowIconHosts[instrument.id] = iconHost
         if instrument.state == .disabled {
@@ -2039,6 +2075,11 @@ final class MainWindow {
         row.set(child: rowBox)
         attachInstrumentContextMenu(row: row, anchor: rowBox, instrument: instrument)
         return row
+    }
+
+    private func instrumentIncompatibilityReason(for instrument: LumaCore.InstrumentInstance) -> String? {
+        guard let node = engine?.node(forSessionID: instrument.sessionID) else { return nil }
+        return node.instruments.first(where: { $0.id == instrument.id })?.incompatibilityReason
     }
 
     private func makeInsightRow(_ insight: LumaCore.AddressInsight) -> ListBoxRow {

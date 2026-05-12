@@ -1,3 +1,4 @@
+import Frida
 import LumaCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -12,6 +13,7 @@ struct AddInstrumentSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var commitCoordinator = InstrumentConfigCommitCoordinator()
+    @State private var systemParams: SystemParameters?
 
     @State private var selectedDescriptorID: InstrumentDescriptor.ID?
     @State private var initialConfigJSON = Data()
@@ -53,7 +55,19 @@ struct AddInstrumentSheet: View {
     private var isConfirmActionDisabled: Bool {
         if selectedDescriptorID == Self.newCustomDescriptorID { return false }
         if selectedDescriptorID == Self.importHookPackDescriptorID { return false }
-        return selectedDescriptor == nil
+        guard let descriptor = selectedDescriptor else { return true }
+        return incompatibilityReason(for: descriptor) != nil
+    }
+
+    private func incompatibilityReason(for descriptor: InstrumentDescriptor) -> String? {
+        guard let systemParams else { return nil }
+        return descriptor.compatibility.incompatibilityReason(for: systemParams)
+    }
+
+    private func resolveSystemParameters() async {
+        let devices = await engine.deviceManager.currentDevices()
+        guard let device = devices.first(where: { $0.id == session.deviceID }) else { return }
+        systemParams = await engine.systemParameters.parameters(for: device)
     }
 
     var body: some View {
@@ -78,6 +92,7 @@ struct AddInstrumentSheet: View {
         } message: { message in
             Text(message)
         }
+        .task(id: session.deviceID) { await resolveSystemParameters() }
     }
 
     private var importErrorBinding: Binding<Bool> {
@@ -285,29 +300,55 @@ struct AddInstrumentSheet: View {
 
     @ViewBuilder
     private func detailContent(descriptor: InstrumentDescriptor) -> some View {
-        if let ui = InstrumentUIRegistry.shared.ui(for: descriptor.id) {
-            ui.makeConfigEditor(
-                configJSON: $initialConfigJSON,
-                engine: engine,
-                selection: $selection
-            )
-            .environment(\.instrumentSession, session)
-            .environment(\.instrumentConfigCommitCoordinator, commitCoordinator)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding()
-        } else {
-            Text("Configuration unavailable.")
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            if let reason = incompatibilityReason(for: descriptor) {
+                incompatibilityBanner(reason: reason)
+            }
+            if let ui = InstrumentUIRegistry.shared.ui(for: descriptor.id) {
+                ui.makeConfigEditor(
+                    configJSON: $initialConfigJSON,
+                    engine: engine,
+                    selection: $selection
+                )
+                .environment(\.instrumentSession, session)
+                .environment(\.instrumentConfigCommitCoordinator, commitCoordinator)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding()
+            } else {
+                Text("Configuration unavailable.")
+                    .foregroundStyle(.secondary)
+                    .padding()
+            }
         }
     }
 
-    private func descriptorRow(_ descriptor: InstrumentDescriptor) -> some View {
-        HStack {
-            InstrumentIconView(icon: descriptor.icon, pointSize: 12)
-            Text(descriptor.displayName)
+    private func incompatibilityBanner(reason: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(reason)
+                .font(.callout)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.orange.opacity(0.12))
+    }
+
+    private func descriptorRow(_ descriptor: InstrumentDescriptor) -> some View {
+        let reason = incompatibilityReason(for: descriptor)
+        return HStack {
+            InstrumentIconView(icon: descriptor.icon, pointSize: 12)
+            Text(descriptor.displayName)
+            Spacer(minLength: 4)
+            if reason != nil {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(reason == nil ? 1 : 0.5)
+        .help(reason ?? "")
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("addInstrument.descriptor.\(descriptor.id)")
     }

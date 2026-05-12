@@ -13,6 +13,7 @@ final class AddInstrumentDialog {
     private let parentWindow: Gtk.Window
     private let descriptors: [LumaCore.InstrumentDescriptor]
     private let disabledDescriptorIDs: Set<String>
+    private let incompatibilityReasons: [String: String]
     private let onAdded: OnAdded?
     private let engine: Engine
     private let sessionID: UUID
@@ -37,12 +38,14 @@ final class AddInstrumentDialog {
         sessionID: UUID,
         descriptors: [LumaCore.InstrumentDescriptor],
         disabledDescriptorIDs: Set<String> = [],
+        incompatibilityReasons: [String: String] = [:],
         tracerEditor: MonacoEditor,
         codeShareEditor: MonacoEditor,
         onAdded: OnAdded? = nil
     ) {
         self.descriptors = descriptors
         self.disabledDescriptorIDs = disabledDescriptorIDs
+        self.incompatibilityReasons = incompatibilityReasons
         self.onAdded = onAdded
         self.engine = engine
         self.sessionID = sessionID
@@ -101,7 +104,9 @@ final class AddInstrumentDialog {
 
         for descriptor in descriptors {
             let row = ListBoxRow()
-            let isDisabled = disabledDescriptorIDs.contains(descriptor.id)
+            let alreadyAdded = disabledDescriptorIDs.contains(descriptor.id)
+            let incompatibilityReason = incompatibilityReasons[descriptor.id]
+            let isInert = alreadyAdded || incompatibilityReason != nil
             let rowBox = Box(orientation: .vertical, spacing: 2)
             rowBox.marginStart = 12
             rowBox.marginEnd = 12
@@ -110,15 +115,13 @@ final class AddInstrumentDialog {
             let label = Label(str: descriptor.displayName)
             label.halign = .start
             rowBox.append(child: label)
-            if isDisabled {
-                let hint = Label(str: "Already added")
-                hint.halign = .start
-                hint.add(cssClass: "caption")
-                hint.add(cssClass: "dim-label")
-                rowBox.append(child: hint)
+            if alreadyAdded {
+                rowBox.append(child: hintLabel("Already added"))
+            } else if let reason = incompatibilityReason {
+                rowBox.append(child: hintLabel(reason))
             }
             row.set(child: rowBox)
-            if isDisabled {
+            if isInert {
                 row.sensitive = false
                 row.selectable = false
             }
@@ -192,6 +195,16 @@ final class AddInstrumentDialog {
     func present() {
         Self.retain(self, dialog: dialog)
         dialog.present(parent: parentWindow)
+    }
+
+    private func hintLabel(_ text: String) -> Label {
+        let hint = Label(str: text)
+        hint.halign = .start
+        hint.add(cssClass: "caption")
+        hint.add(cssClass: "dim-label")
+        hint.wrap = true
+        hint.xalign = 0
+        return hint
     }
 
     private static var retained: [ObjectIdentifier: AddInstrumentDialog] = [:]

@@ -16,11 +16,7 @@ public actor SystemParametersCache {
             return SystemParameters(raw: raw)
         }
         entries[deviceID] = task
-        let result = await task.value
-        if result == nil {
-            entries[deviceID] = nil
-        }
-        return result
+        return await task.value
     }
 
     public func invalidate(deviceID: String) {

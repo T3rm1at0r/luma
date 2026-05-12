@@ -503,15 +503,17 @@ private struct SidebarInstrumentRow: View {
 
     @State private var isShowingDeleteConfirm = false
 
-    private var descriptor: InstrumentDescriptor {
-        engine.descriptor(for: instance)
-    }
-
     var body: some View {
         HStack(spacing: 6) {
             InstrumentIconView(icon: descriptor.icon, pointSize: 12)
                 .frame(width: subrowIconWidth, alignment: .center)
             Text(descriptor.displayName)
+            if let reason = incompatibilityReason {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .help(reason)
+            }
             Spacer()
         }
         .font(.callout)
@@ -553,6 +555,14 @@ private struct SidebarInstrumentRow: View {
         } message: {
             Text("This will remove \"\(descriptor.displayName)\" from this session.")
         }
+    }
+
+    private var descriptor: InstrumentDescriptor {
+        engine.descriptor(for: instance)
+    }
+
+    private var incompatibilityReason: String? {
+        node?.instruments.first(where: { $0.id == instance.id })?.incompatibilityReason
     }
 
     private func deleteInstrument() {
@@ -657,6 +667,7 @@ struct SidebarCustomInstrumentDefRow: View {
     @Binding var selection: SidebarItemID?
 
     @State private var isShowingRename = false
+    @State private var isShowingCompatibility = false
     @State private var isShowingFeatures = false
     @State private var isShowingWidgets = false
     @State private var isShowingDeleteConfirm = false
@@ -677,6 +688,11 @@ struct SidebarCustomInstrumentDefRow: View {
                 isShowingRename = true
             } label: {
                 Label("Rename & Icon\u{2026}", systemImage: "pencil")
+            }
+            Button {
+                isShowingCompatibility = true
+            } label: {
+                Label("Compatibility\u{2026}", systemImage: "checkmark.shield")
             }
             Button {
                 isShowingFeatures = true
@@ -701,6 +717,12 @@ struct SidebarCustomInstrumentDefRow: View {
         }
         .popover(isPresented: $isShowingRename, arrowEdge: .trailing) {
             CustomInstrumentRenamePopover(
+                def: def,
+                engine: engine
+            )
+        }
+        .popover(isPresented: $isShowingCompatibility, arrowEdge: .trailing) {
+            CustomInstrumentCompatibilityPopover(
                 def: def,
                 engine: engine
             )
