@@ -119,7 +119,7 @@ private struct ProjectContentView: View {
             if engine.collaboration.isCollaborative {
                 engine.setCollaborationPanelVisible(true)
             }
-            if engine.selectedSidebarItem == nil, !engine.notebookEntries.isEmpty {
+            if engine.selectedSidebarItem == nil {
                 engine.selectedSidebarItem = .notebook
             }
         }
