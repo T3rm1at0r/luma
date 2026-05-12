@@ -20,6 +20,7 @@ struct AddInstrumentSheet: View {
     @State private var compactPath: [InstrumentDescriptor.ID] = []
     @State private var isShowingImportPicker = false
     @State private var importErrorMessage: String?
+    @State private var alreadyAddedDescriptorIDs: Set<InstrumentDescriptor.ID> = []
 
     #if canImport(UIKit)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -56,12 +57,22 @@ struct AddInstrumentSheet: View {
         if selectedDescriptorID == Self.newCustomDescriptorID { return false }
         if selectedDescriptorID == Self.importHookPackDescriptorID { return false }
         guard let descriptor = selectedDescriptor else { return true }
+        if isAlreadyAdded(descriptor) { return true }
         return incompatibilityReason(for: descriptor) != nil
+    }
+
+    private func isAlreadyAdded(_ descriptor: InstrumentDescriptor) -> Bool {
+        alreadyAddedDescriptorIDs.contains(descriptor.id)
     }
 
     private func incompatibilityReason(for descriptor: InstrumentDescriptor) -> String? {
         guard let systemParams else { return nil }
         return descriptor.compatibility.incompatibilityReason(for: systemParams)
+    }
+
+    private func refreshAlreadyAdded() {
+        let existing = (try? engine.store.fetchInstruments(sessionID: session.id)) ?? []
+        alreadyAddedDescriptorIDs = Set(existing.map { engine.descriptor(for: $0).id })
     }
 
     private func resolveSystemParameters() async {
@@ -93,6 +104,7 @@ struct AddInstrumentSheet: View {
             Text(message)
         }
         .task(id: session.deviceID) { await resolveSystemParameters() }
+        .task(id: session.id) { refreshAlreadyAdded() }
     }
 
     private var importErrorBinding: Binding<Bool> {
@@ -301,7 +313,9 @@ struct AddInstrumentSheet: View {
     @ViewBuilder
     private func detailContent(descriptor: InstrumentDescriptor) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = incompatibilityReason(for: descriptor) {
+            if isAlreadyAdded(descriptor) {
+                incompatibilityBanner(reason: "This instrument is already added to the session.")
+            } else if let reason = incompatibilityReason(for: descriptor) {
                 incompatibilityBanner(reason: reason)
             }
             if let ui = InstrumentUIRegistry.shared.ui(for: descriptor.id) {
@@ -336,19 +350,22 @@ struct AddInstrumentSheet: View {
 
     private func descriptorRow(_ descriptor: InstrumentDescriptor) -> some View {
         let reason = incompatibilityReason(for: descriptor)
+        let alreadyAdded = isAlreadyAdded(descriptor)
+        let dimmed = reason != nil || alreadyAdded
+        let helpText = reason ?? (alreadyAdded ? "Already added" : "")
         return HStack {
             InstrumentIconView(icon: descriptor.icon, pointSize: 12)
             Text(descriptor.displayName)
             Spacer(minLength: 4)
-            if reason != nil {
+            if dimmed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.secondary)
                     .font(.system(size: 11))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .opacity(reason == nil ? 1 : 0.5)
-        .help(reason ?? "")
+        .opacity(dimmed ? 0.5 : 1)
+        .help(helpText)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("addInstrument.descriptor.\(descriptor.id)")
     }
