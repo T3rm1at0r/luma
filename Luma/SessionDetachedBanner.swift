@@ -275,7 +275,7 @@ struct SessionDetachedBanner: View {
     private var detachReasonText: String? {
         switch session.detachReason {
         case .applicationRequested:
-            return nil
+            return "Not currently attached."
         case .processReplaced:
             return "Detached because the process was replaced."
         case .processTerminated:

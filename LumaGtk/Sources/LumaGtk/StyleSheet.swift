@@ -71,6 +71,27 @@ enum StyleSheet {
         transition: none;
     }
 
+    .luma-banner {
+        padding: 8px 12px;
+    }
+    .luma-banner.luma-banner-info {
+        background-color: rgba(255, 204, 0, 0.15);
+        border-bottom: 1px solid rgba(255, 204, 0, 0.30);
+    }
+    .luma-banner.luma-banner-warning {
+        background-color: rgba(255, 149, 0, 0.15);
+        border-bottom: 1px solid rgba(255, 149, 0, 0.40);
+    }
+    .luma-banner.luma-banner-error {
+        background-color: rgba(255, 69, 58, 0.15);
+        border-bottom: 1px solid rgba(255, 69, 58, 0.40);
+    }
+    .luma-banner-divider {
+        background-color: alpha(@theme_fg_color, 0.25);
+        min-width: 1px;
+        margin: 2px 0;
+    }
+
     .luma-disasm-row:hover {
         background-color: alpha(@theme_fg_color, 0.05);
         border-radius: 8px;

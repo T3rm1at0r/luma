@@ -15,7 +15,7 @@ final class SessionDetailView {
     private let sessionID: UUID
 
     private let bannerSlot: Box
-    private var currentBanner: Adw.Banner?
+    private var currentBanner: Widget?
     private let titleLabel: Label
     private let sectionBar: Box
     private let summaryButton: ToggleButton
