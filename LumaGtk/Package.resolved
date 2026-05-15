@@ -200,6 +200,15 @@
       }
     },
     {
+      "identity" : "swiftymonaco",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/frida/SwiftyMonaco.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "a68735623257c9aef9baee43b357daaf25520228"
+      }
+    },
+    {
       "identity" : "swiftyr2",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/radareorg/SwiftyR2",
