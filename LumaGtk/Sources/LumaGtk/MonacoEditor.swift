@@ -4,6 +4,7 @@ import Foundation
 import GLibObject
 import Gtk
 import LumaCore
+import MonacoWebBundle
 
 @MainActor
 public final class MonacoEditor {
@@ -54,11 +55,7 @@ public final class MonacoEditor {
         luma_monaco_view_set_load_finished(view, monacoEditorBootstrap, context)
         luma_monaco_view_set_text_handler(view, monacoEditorTextChanged, context)
 
-        guard let resourceDir = Bundle.module.url(forResource: "MonacoWeb", withExtension: nil) else {
-            fatalError("MonacoWeb resources not found in bundle")
-        }
-        let indexURL = resourceDir.appendingPathComponent("index.html")
-        luma_monaco_view_load_uri(view, indexURL.absoluteString)
+        luma_monaco_view_load_uri(view, MonacoWebBundle.indexURL.absoluteString)
     }
 
     deinit {

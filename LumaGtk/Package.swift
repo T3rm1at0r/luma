@@ -151,6 +151,7 @@ let package = Package(
         .package(name: "luma", path: ".."),
         .package(url: "https://github.com/frida/SwiftGtk.git", branch: "gtk4-development"),
         .package(url: "https://github.com/frida/SwiftAdw.git", branch: "development"),
+        .package(url: "https://github.com/frida/SwiftyMonaco.git", branch: "main"),
     ],
     targets: [
         .target(
@@ -168,12 +169,12 @@ let package = Package(
                 .product(name: "LumaCore", package: "luma"),
                 .product(name: "Gtk", package: "SwiftGtk"),
                 .product(name: "Adw", package: "SwiftAdw"),
+                .product(name: "MonacoWebBundle", package: "SwiftyMonaco"),
                 "CLuma",
             ],
             path: "Sources/LumaGtk",
             exclude: lumaGtkExcludes,
             resources: [
-                .copy("Resources/MonacoWeb"),
                 .copy("Resources/nowsecure-logo.svg"),
             ],
             swiftSettings: [
