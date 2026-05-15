@@ -366,8 +366,7 @@ private struct ProjectContentView: View {
             Spacer()
         }
         .padding(.horizontal, 8)
-        .padding(.top, 4)
-        .padding(.bottom, 11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             collapsedNewEvents > 0
                 ? Color.accentColor.opacity(0.12)
