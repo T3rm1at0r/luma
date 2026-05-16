@@ -258,8 +258,9 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         // host loads via the standard instrument lifecycle.
         //
         // create():    install your hooks; return updateConfig + dispose,
-        //              plus onAction if your list or table widgets
-        //              declare actions.
+        //              plus onAction if your list or table widgets declare
+        //              actions, and onConsoleInput if you have a console
+        //              widget.
         // dispose():   undo every side effect (detach listeners, revert
         //              replacements). Save will call this and then re-create
         //              with the new source.
@@ -270,20 +271,26 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         //
         // Widgets declared in the sidebar render in the instance pane and
         // are accessed via `ctx.widget(id)`:
+        //   - counter:   setCounter({ value, unit?, delta? }), clear()
+        //   - histogram: setHistogram(buckets),
+        //                incrementBucket(label, by?), clear()
         //   - graph:     push({ series, x, y }), clear()
         //   - list:      upsertItem({ id, title, subtitle?, accessory? }),
         //                removeItem(id), clear()
         //   - table:     upsertRow({ id, cells }), removeRow(id), clear()
-        //   - counter:   setCounter({ value, unit?, delta? }), clear()
-        //   - histogram: setHistogram(buckets),
-        //                incrementBucket(label, by?), clear()
         //   - hex:       setHex({ bytes, baseAddress? }), clear()
+        //   - console:   appendOutput(text), appendError(text),
+        //                appendConsole({ kind, text }), clear()
+        //
         // Action buttons on a list or table widget invoke onAction({
-        // widget, action, item }) on the handle. The `widget` and `action`
-        // fields are narrowed to the ids you declared. The `restored`
-        // argument carries the last snapshot for each widget whose
-        // Persistence is set to Session — widgets left at None do not
-        // appear on `restored`.
+        // widget, action, item }) on the handle. Submissions from a
+        // console widget invoke onConsoleInput({ widget, entryId, text })
+        // — echo the result back with the matching widget's
+        // appendOutput / appendError. The `widget` and `action` fields are
+        // narrowed to the ids you declared. The `restored` argument
+        // carries the last snapshot for each widget whose Persistence is
+        // set to Session — widgets left at None do not appear on
+        // `restored`.
         //
         // The example below assumes:
         //   - one feature `logStack` (Boolean)
@@ -291,6 +298,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         //     Persistence = Session (required for `restored.opens`
         //     to type-check)
         //   - one list widget `paths` with action `bookmark`
+        //   - one console widget `repl`
         // Until you add them, the lines referencing them are type
         // errors — add them via right-click → Features… / Widgets…,
         // or delete the corresponding lines.
@@ -324,6 +332,11 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
                         if (action.widget === "paths" && action.action === "bookmark") {
                             bookmarks.add(action.item);
                             ctx.emit({ bookmarked: action.item });
+                        }
+                    },
+                    onConsoleInput({ widget, text }) {
+                        if (widget === "repl") {
+                            ctx.widget("repl").appendOutput(`echo: ${text}`);
                         }
                     },
                     dispose() {
