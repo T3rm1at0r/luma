@@ -254,14 +254,16 @@ private struct DrawerHost<Content: View>: View {
 
     @State private var expanded = false
     @State private var dragOffset: CGFloat = 0
+    @State private var keyboard = KeyboardObserver()
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
             let defaultWidth = min(width * 0.85, width - 40)
             let drawerWidth = expanded ? width : defaultWidth
+            let drawerHeight = max(0, geo.size.height - keyboard.height)
 
-            ZStack(alignment: .trailing) {
+            ZStack(alignment: .topTrailing) {
                 content()
 
                 if active != nil {
@@ -273,9 +275,8 @@ private struct DrawerHost<Content: View>: View {
 
                 if let kind = active {
                     drawerBody(for: kind)
-                        .keyboardAdaptive()
                         .frame(width: drawerWidth)
-                        .frame(maxHeight: .infinity)
+                        .frame(height: drawerHeight, alignment: .top)
                         .background(Color.platformWindowBackground)
                         .shadow(color: .black.opacity(0.3), radius: 12, x: -4, y: 0)
                         .offset(x: dragOffset)
@@ -318,6 +319,7 @@ private struct DrawerHost<Content: View>: View {
                 }
             }
         }
+        .ignoresSafeArea(.keyboard)
     }
 
     @ViewBuilder

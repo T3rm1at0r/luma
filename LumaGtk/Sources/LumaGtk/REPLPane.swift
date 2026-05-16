@@ -145,6 +145,15 @@ final class REPLPane {
             }
             return "Armed but inactive — resume spawn gating to capture launches."
         }
+        if let host = session.host,
+           engine?.node(forSessionID: session.id) == nil,
+           session.phase == .attached || session.phase == .attaching
+        {
+            if host.id == engine?.collaboration.localUser?.id {
+                return "Hosted by you on \(session.deviceName) — REPL runs on the hosting device."
+            }
+            return "Hosted by @\(host.id) on \(session.deviceName) — REPL runs on the hosting device."
+        }
         if session.lastAttachedAt != nil {
             return "Session detached — use \(session.kind.reestablishLabel) to continue."
         }
