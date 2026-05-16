@@ -49,6 +49,17 @@ func sharedGitHubAuth() -> GitHubAuth { sharedWelcomeModel.gitHubAuth }
                 CommandGroup(after: .appInfo) {
                     CheckForUpdatesView(updater: updater)
                 }
+                CommandGroup(replacing: .newItem) {
+                    Button("New Project") {
+                        NSDocumentController.shared.newDocument(nil)
+                    }
+                    .keyboardShortcut("n", modifiers: [.command])
+
+                    Button("Open Project\u{2026}") {
+                        NSDocumentController.shared.openDocument(nil)
+                    }
+                    .keyboardShortcut("o", modifiers: [.command])
+                }
             }
         }
     }
