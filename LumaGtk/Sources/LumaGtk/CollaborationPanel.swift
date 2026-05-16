@@ -506,10 +506,11 @@ final class CollaborationPanel {
 
     private func observeChat() {
         guard let engine else { return }
+        engine.collaboration.onChatMessagesDidChange = { [weak self] in
+            self?.refreshChat()
+        }
         engine.collaboration.onChatMessageReceived = { [weak self] message in
-            guard let self else { return }
-            self.appendChatMessage(message)
-            guard !message.isLocal, let engine = self.engine else { return }
+            guard let self, !message.isLocal, let engine = self.engine else { return }
             self.desktopNotifier?.notifyChatMessage(message, labID: engine.collaboration.labID)
         }
     }
@@ -897,16 +898,6 @@ final class CollaborationPanel {
         refreshChatInputState()
     }
 
-    private func appendChatMessage(_ message: LumaCore.CollaborationSession.ChatMessage) {
-        chatListBox.append(child: buildChatRow(for: message))
-
-        lastChatCount += 1
-        if isPinnedToBottom {
-            scrollChatToBottomSoon()
-        }
-        refreshChatInputState()
-    }
-
     private func buildChatRow(for message: LumaCore.CollaborationSession.ChatMessage) -> ListBoxRow {
         let row = ListBoxRow()
         row.selectable = false
@@ -1092,9 +1083,14 @@ final class CollaborationPanel {
         guard let engine else { return }
         let text = (chatEntry.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if case .joined = engine.collaboration.status {
-            engine.collaboration.sendChat(text)
-            chatEntry.text = ""
+        guard case .joined = engine.collaboration.status else { return }
+        chatEntry.text = ""
+        Task { [weak self, collaboration = engine.collaboration] in
+            do {
+                try await collaboration.sendChat(text)
+            } catch {
+                self?.chatEntry.text = text
+            }
         }
     }
 

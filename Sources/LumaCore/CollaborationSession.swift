@@ -217,13 +217,15 @@ public final class CollaborationSession {
         }
 
         public static func fromJSON(_ obj: [String: Any], localUser: UserInfo) -> ChatMessage? {
-            guard let text = obj["text"] as? String,
+            guard let idString = obj["id"] as? String,
+                let id = UUID(uuidString: idString),
+                let text = obj["text"] as? String,
                 let senderObj = obj["user"] as? [String: Any],
                 let sender = UserInfo.fromJSON(senderObj),
                 let timestampString = obj["timestamp"] as? String,
                 let timestamp = parseTimestamp(timestampString)
             else { return nil }
-            return ChatMessage(text: text, sender: sender, isLocal: sender.id == localUser.id, timestamp: timestamp)
+            return ChatMessage(id: id, text: text, sender: sender, isLocal: sender.id == localUser.id, timestamp: timestamp)
         }
 
         private static func parseTimestamp(_ s: String) -> Date? {
@@ -321,6 +323,7 @@ public final class CollaborationSession {
     public var onWidgetStatesSnapshot: (([WidgetStateSnapshot]) -> Void)?
     public var onSessionOpRejected: ((UUID, String) -> Void)?
     public var onChatMessageReceived: ((ChatMessage) -> Void)?
+    public var onChatMessagesDidChange: (() -> Void)?
     public var onAuthRejected: ((AuthFailure) async -> Void)?
 
     private var nextRequestId = 0
@@ -397,6 +400,7 @@ public final class CollaborationSession {
         pendingCreateOrJoinDispatched = false
         members = []
         chatMessages = []
+        onChatMessagesDidChange?()
         vapidPublicKey = nil
         registeredPushPlatforms = []
         pendingRequests.removeAll()
@@ -432,13 +436,60 @@ public final class CollaborationSession {
         device.bus.post(msg, data: data)
     }
 
-    public func sendChat(_ text: String) {
-        guard case .joined(let labID) = status else { return }
-        sendNotification(
-            to: "/labs/\(labID)/chat/messages",
-            type: "+add",
-            payload: ["messages": [["text": text]]]
-        )
+    public func sendChat(_ text: String) async throws {
+        guard case .joined(let labID) = status, let localUser else {
+            throw AuthFailure(domain: "client", code: "not-joined", message: "Not in a lab")
+        }
+        let optimistic = ChatMessage(text: text, sender: localUser, isLocal: true)
+        chatMessages.append(optimistic)
+        onChatMessagesDidChange?()
+        do {
+            let confirmed = try await requestAddChat(labID: labID, message: optimistic, localUser: localUser)
+            replaceChatMessage(id: optimistic.id, with: confirmed)
+        } catch {
+            removeChatMessage(id: optimistic.id)
+            throw error
+        }
+    }
+
+    private func requestAddChat(labID: String, message: ChatMessage, localUser: UserInfo) async throws -> ChatMessage {
+        try await withCheckedThrowingContinuation { cont in
+            sendRequest(
+                to: "/labs/\(labID)/chat/messages",
+                type: ".add",
+                payload: ["messages": [["id": message.id.uuidString, "text": message.text]]]
+            ) { result in
+                switch result {
+                case .success(let payload):
+                    guard let msgs = payload["messages"] as? [JSONObject],
+                        let first = msgs.first,
+                        let parsed = ChatMessage.fromJSON(first, localUser: localUser)
+                    else {
+                        cont.resume(throwing: AuthFailure(
+                            domain: "portal",
+                            code: "bad-response",
+                            message: "Missing 'messages' in chat response"
+                        ))
+                        return
+                    }
+                    cont.resume(returning: parsed)
+                case .failure(let err):
+                    cont.resume(throwing: err)
+                }
+            }
+        }
+    }
+
+    private func replaceChatMessage(id: UUID, with replacement: ChatMessage) {
+        guard let index = chatMessages.firstIndex(where: { $0.id == id }) else { return }
+        chatMessages[index] = replacement
+        onChatMessagesDidChange?()
+    }
+
+    private func removeChatMessage(id: UUID) {
+        guard let index = chatMessages.firstIndex(where: { $0.id == id }) else { return }
+        chatMessages.remove(at: index)
+        onChatMessagesDidChange?()
     }
 
     /// True once this project has ever joined or created a lab. Local-only
@@ -1310,6 +1361,7 @@ public final class CollaborationSession {
         setStatus(.joined(labID: labID))
         members = memberDicts.compactMap(Member.fromJSON)
         chatMessages = chatMsgs.compactMap { ChatMessage.fromJSON($0, localUser: localUser) }
+        onChatMessagesDidChange?()
 
         var collabState = try! store.fetchCollaborationState()
         collabState.labID = labID
@@ -1627,12 +1679,15 @@ public final class CollaborationSession {
 
         case ("+add", let s) where s.count == 4 && s[0] == "labs" && s[2] == "chat" && s[3] == "messages":
             guard let localUser, let msgs = payload["messages"] as? [JSONObject] else { return }
+            var added = false
             for m in msgs {
                 if let message = ChatMessage.fromJSON(m, localUser: localUser) {
                     chatMessages.append(message)
                     onChatMessageReceived?(message)
+                    added = true
                 }
             }
+            if added { onChatMessagesDidChange?() }
 
         default:
             break

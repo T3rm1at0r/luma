@@ -583,8 +583,14 @@ private struct ChatInputRow: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, isActive else { return }
 
-        collaboration.sendChat(text)
         draft = ""
+        Task {
+            do {
+                try await collaboration.sendChat(text)
+            } catch {
+                draft = text
+            }
+        }
     }
 }
 
