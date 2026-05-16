@@ -708,9 +708,8 @@ private struct LabPictureView: View {
 
     /// Downscale the user-supplied image to at most 512×512 and re-
     /// encode as JPEG. Keeps the wire payload well under the server's
-    /// 512 KiB cap and prevents a multi-megapixel file from tanking
-    /// the UI when we render it into a 48-pt slot. Images already
-    /// smaller than the cap pass through unchanged.
+    /// 512 KiB cap, fits the UI's 48-pt display budget, and strips
+    /// any EXIF metadata the source file carried.
     private func normalizedPicture(
         from data: Data,
         originalExtension ext: String,
@@ -729,11 +728,7 @@ private struct LabPictureView: View {
         guard let image = NSImage(data: data) else { return passthrough }
         let size = image.size
         let longest = max(size.width, size.height)
-        if longest <= maxDimension && data.count <= 512 * 1024 {
-            return passthrough
-        }
-
-        let scale = maxDimension / longest
+        let scale = min(1, maxDimension / longest)
         let target = CGSize(width: size.width * scale, height: size.height * scale)
         let resized = NSImage(size: target)
         resized.lockFocus()
@@ -770,13 +765,11 @@ private struct LabPictureView: View {
         guard let image = UIImage(data: data) else { return (data, "image/jpeg") }
         let size = image.size
         let longest = max(size.width, size.height)
-        if longest <= maxDimension && data.count <= 512 * 1024,
-           let jpeg = image.jpegData(compressionQuality: 0.85) {
-            return (jpeg, "image/jpeg")
-        }
         let scale = min(1, maxDimension / longest)
         let target = CGSize(width: size.width * scale, height: size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: target)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
         let resized = renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: target))
         }
