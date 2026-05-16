@@ -466,7 +466,7 @@ final class CollaborationPanel {
         guard let engine else { return }
         let dialog = Adw.AlertDialog(
             heading: "Leave this lab?",
-            body: "You'll lose access to the shared notebook, sessions, and chat. The lab keeps going for everyone else."
+            body: "You'll lose access to the lab's shared state. The lab keeps going for everyone else."
         )
         dialog.addResponse(id: "cancel", label: "_Cancel")
         dialog.addResponse(id: "leave", label: "Leave")
@@ -614,7 +614,7 @@ final class CollaborationPanel {
                 info.add(cssClass: "dim-label")
                 labSection.append(child: info)
 
-                let explanation = Label(str: "Enable collaboration to share this project's notebook and sessions, with chat and presence alongside.")
+                let explanation = Label(str: "Enable collaboration to share this project's state with teammates, including chat and presence.")
                 explanation.halign = .start
                 explanation.wrap = true
                 explanation.xalign = 0
