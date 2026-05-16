@@ -491,6 +491,17 @@ public enum CustomInstrumentTypings {
             widget<K extends keyof CustomInstrumentWidgetMap>(id: K): CustomInstrumentWidgetMap[K];
         }
 
+        declare interface CustomInstrumentCounterWidget {
+            setCounter(value: { value: number, unit?: string, delta?: number }): void;
+            clear(): void;
+        }
+
+        declare interface CustomInstrumentHistogramWidget {
+            setHistogram(buckets: Array<{ label: string, count: number }>): void;
+            incrementBucket(label: string, by?: number): void;
+            clear(): void;
+        }
+
         declare interface CustomInstrumentGraphWidget<Series extends string> {
             push(point: { series: Series, x: number, y: number }): void;
             clear(): void;
@@ -508,19 +519,15 @@ public enum CustomInstrumentTypings {
             clear(): void;
         }
 
-        declare interface CustomInstrumentCounterWidget {
-            setCounter(value: { value: number, unit?: string, delta?: number }): void;
-            clear(): void;
-        }
-
-        declare interface CustomInstrumentHistogramWidget {
-            setHistogram(buckets: Array<{ label: string, count: number }>): void;
-            incrementBucket(label: string, by?: number): void;
-            clear(): void;
-        }
-
         declare interface CustomInstrumentHexWidget {
             setHex(state: { bytes: ArrayBuffer | number[], baseAddress?: number | string }): void;
+            clear(): void;
+        }
+
+        declare interface CustomInstrumentConsoleWidget {
+            appendOutput(text: string): void;
+            appendError(text: string): void;
+            appendConsole(entry: { id?: string, kind: "input" | "output" | "error", text: string }): void;
             clear(): void;
         }
 
@@ -536,6 +543,13 @@ public enum CustomInstrumentTypings {
                     : never
         }[keyof CustomInstrumentWidgetMap];
 
+        declare type CustomInstrumentConsoleInput = {
+            [K in keyof CustomInstrumentWidgetMap]:
+                CustomInstrumentWidgetMap[K] extends CustomInstrumentConsoleWidget
+                    ? { widget: K; entryId: string; text: string }
+                    : never
+        }[keyof CustomInstrumentWidgetMap];
+
         declare type CustomFeatureValue = boolean | number | string | CustomFeatureValue[] | { [name: string]: CustomFeatureValue };
 
         declare interface CustomInstrumentFeatureMap {
@@ -548,7 +562,16 @@ public enum CustomInstrumentTypings {
         declare interface CustomInstrumentHandle {
             updateConfig?(config: CustomInstrumentConfig): void | Promise<void>;
             onAction?(action: CustomInstrumentAction): void | Promise<void>;
+            onConsoleInput?(input: CustomInstrumentConsoleInput): void | Promise<void>;
             dispose?(): void | Promise<void>;
+        }
+
+        declare interface CustomInstrumentCounterSnapshot {
+            counter: { value: number; unit?: string; delta?: number } | null;
+        }
+
+        declare interface CustomInstrumentHistogramSnapshot {
+            buckets: Array<{ label: string; count: number }>;
         }
 
         declare interface CustomInstrumentGraphSnapshot<Series extends string> {
@@ -563,16 +586,12 @@ public enum CustomInstrumentTypings {
             rows: Array<{ id: string; cells: { [K in Column]: string } }>;
         }
 
-        declare interface CustomInstrumentCounterSnapshot {
-            counter: { value: number; unit?: string; delta?: number } | null;
-        }
-
-        declare interface CustomInstrumentHistogramSnapshot {
-            buckets: Array<{ label: string; count: number }>;
-        }
-
         declare interface CustomInstrumentHexSnapshot {
             hex: { bytes: string; base_address: number } | null;
+        }
+
+        declare interface CustomInstrumentConsoleSnapshot {
+            entries: Array<{ id: string; kind: "input" | "output" | "error"; text: string }>;
         }
 
         declare interface CustomInstrumentRestoredState {
