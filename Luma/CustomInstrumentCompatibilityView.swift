@@ -46,7 +46,7 @@ struct CustomInstrumentCompatibilityPopover: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.subheadline.weight(.semibold))
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 100), alignment: .leading)],
+                columns: [GridItem(.adaptive(minimum: gridColumnMinimum), alignment: .leading)],
                 alignment: .leading,
                 spacing: 4
             ) {
@@ -60,8 +60,18 @@ struct CustomInstrumentCompatibilityPopover: View {
     private func valueToggle(_ value: String, displayName: (String) -> String, selection: Binding<Set<String>>) -> some View {
         Toggle(isOn: bindingForValue(value, in: selection)) {
             Text(displayName(value))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .platformCheckboxToggleStyle()
+    }
+
+    private var gridColumnMinimum: CGFloat {
+        #if canImport(UIKit)
+        return 160
+        #else
+        return 100
+        #endif
     }
 
     private func bindingForValue(_ value: String, in selection: Binding<Set<String>>) -> Binding<Bool> {
