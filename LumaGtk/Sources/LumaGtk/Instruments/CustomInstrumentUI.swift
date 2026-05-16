@@ -92,11 +92,10 @@ private final class CustomDetailUI: InstrumentDetailUI {
 
         if def.features.isEmpty {
             outer.append(child: InstrumentUIHelpers.dimLabel("This custom instrument does not declare any features."))
-            return
-        }
-
-        for feature in def.features {
-            outer.append(child: makeFeatureRow(feature: feature, config: config))
+        } else {
+            for feature in def.features {
+                outer.append(child: makeFeatureRow(feature: feature, config: config))
+            }
         }
 
         widgetRenderer = InstrumentUIHelpers.appendWidgets(
