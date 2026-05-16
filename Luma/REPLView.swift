@@ -284,7 +284,7 @@ struct REPLView: View {
             return
         }
 
-        if !engine.isHostingNode(sessionID) {
+        if engine.isHostedRemotelyLive(sessionID) {
             let cellID = UUID()
             let placeholder = LumaCore.REPLCell(
                 id: cellID,

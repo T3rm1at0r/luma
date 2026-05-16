@@ -428,11 +428,7 @@ struct PhoneSessionRow: View {
     }
 
     private var isHostedRemotelyLive: Bool {
-        guard let host = session.host,
-              host.id != engine.collaboration.localUser?.id,
-              !engine.isHostingNode(session.id)
-        else { return false }
-        return session.phase == .attached || session.phase == .attaching
+        engine.isHostedRemotelyLive(session.id)
     }
 
     @ViewBuilder

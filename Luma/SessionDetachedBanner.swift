@@ -43,13 +43,7 @@ struct SessionContent<Content: View>: View {
         if isAttached && !hasError {
             return .none
         }
-        if !isAttached,
-           !hasError,
-           engine.collaboration.isCollaborative,
-           let host = session.host,
-           host.id != engine.collaboration.localUser?.id,
-           session.phase == .attached || session.phase == .attaching
-        {
+        if !hasError, engine.isHostedRemotelyLive(session.id) {
             return .none
         }
         if session.lastAttachedAt != nil {

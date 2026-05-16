@@ -651,6 +651,12 @@ public final class Engine {
         node(forSessionID: sessionID) != nil
     }
 
+    public func isHostedRemotelyLive(_ sessionID: UUID) -> Bool {
+        guard let session = sessions.first(where: { $0.id == sessionID }) else { return false }
+        guard session.host != nil, !isHostingNode(sessionID) else { return false }
+        return session.phase == .attached || session.phase == .attaching
+    }
+
     public var canHostNewSessions: Bool {
         !collaboration.isCollaborative || collaboration.isOwner
     }
@@ -2162,7 +2168,7 @@ public final class Engine {
         configJSON: Data,
         sessionID: UUID
     ) async -> InstrumentInstance? {
-        if !isHostingNode(sessionID) {
+        if isHostedRemotelyLive(sessionID) {
             collaboration.sendInstrumentAdd(
                 sessionID: sessionID,
                 kind: kind,
@@ -2206,7 +2212,7 @@ public final class Engine {
     }
 
     public func removeInstrument(_ instance: InstrumentInstance) async {
-        if !isHostingNode(instance.sessionID) {
+        if isHostedRemotelyLive(instance.sessionID) {
             collaboration.sendInstrumentRemove(sessionID: instance.sessionID, instanceID: instance.id)
             return
         }
@@ -2229,7 +2235,7 @@ public final class Engine {
     }
 
     public func setInstrumentState(_ instance: InstrumentInstance, state: InstrumentState) async {
-        if !isHostingNode(instance.sessionID) {
+        if isHostedRemotelyLive(instance.sessionID) {
             collaboration.sendInstrumentSetState(
                 sessionID: instance.sessionID,
                 instanceID: instance.id,
@@ -2266,7 +2272,7 @@ public final class Engine {
     }
 
     public func applyInstrumentConfig(_ instance: InstrumentInstance, configJSON: Data) async {
-        if !isHostingNode(instance.sessionID) {
+        if isHostedRemotelyLive(instance.sessionID) {
             collaboration.sendInstrumentUpdateConfig(
                 sessionID: instance.sessionID,
                 instanceID: instance.id,
@@ -3283,7 +3289,7 @@ public final class Engine {
         widgetStates[update.instanceID] = states
         _widgetUpdates.yield(update)
 
-        if localUserHosts(sessionID), widgetDef?.persistence == .session {
+        if widgetDef?.persistence == .session {
             try? store.saveWidgetState(
                 instanceID: update.instanceID,
                 widgetID: update.widget,
@@ -3322,7 +3328,7 @@ public final class Engine {
         action: String,
         item: String? = nil
     ) async {
-        if !isHostingNode(instance.sessionID) {
+        if isHostedRemotelyLive(instance.sessionID) {
             collaboration.sendWidgetAction(
                 sessionID: instance.sessionID,
                 instanceID: instance.id,

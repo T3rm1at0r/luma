@@ -182,7 +182,7 @@ final class REPLPane {
 
     private func submit(code: String) {
         guard let engine else { return }
-        if !engine.isHostingNode(sessionID) {
+        if engine.isHostedRemotelyLive(sessionID) {
             let cellID = UUID()
             let placeholder = LumaCore.REPLCell(
                 id: cellID,

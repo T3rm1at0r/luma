@@ -2878,18 +2878,10 @@ final class MainWindow: InstrumentUIHost {
 
     private func shouldShowDetachedIndicator(_ session: LumaCore.ProcessSession) -> Bool {
         guard let engine, engine.node(forSessionID: session.id) == nil, !isArmed(session) else { return false }
-        if isHostedRemotelyLive(session, engine: engine) { return false }
+        if engine.isHostedRemotelyLive(session.id) { return false }
         if session.lastAttachedAt != nil { return true }
         if case .attach = session.kind { return true }
         return false
-    }
-
-    private func isHostedRemotelyLive(_ session: LumaCore.ProcessSession, engine: Engine) -> Bool {
-        guard let host = session.host,
-              host.id != engine.collaboration.localUser?.id,
-              engine.node(forSessionID: session.id) == nil
-        else { return false }
-        return session.phase == .attached || session.phase == .attaching
     }
 
     private func detachedTintCssClass(for session: LumaCore.ProcessSession) -> String {
