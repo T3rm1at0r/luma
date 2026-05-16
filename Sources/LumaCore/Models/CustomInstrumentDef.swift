@@ -280,6 +280,9 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         //   - table:     upsertRow({ id, cells }), removeRow(id), clear()
         //   - hex:       setHex({ bytes, baseAddress? }), clear()
         //   - console:   appendOutput(text), appendError(text),
+        //                appendValue(value) — renders any JS value
+        //                (objects, NativePointer, ArrayBuffer, …) using
+        //                the same inspector the REPL uses,
         //                appendConsole({ kind, text }), clear()
         //
         // Action buttons on a list or table widget invoke onAction({
