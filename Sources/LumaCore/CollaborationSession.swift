@@ -858,16 +858,16 @@ public final class CollaborationSession {
         enqueueSessionOp(.addReplCell(.init(sessionID: sessionID, cell: wireCell)))
     }
 
-    public func enqueueAddInstrument(sessionID: UUID, instance: InstrumentInstance) {
+    public func enqueueAddInstrument(sessionID: UUID, instance: InstrumentInstance, runtimeStatus: InstrumentStatus? = nil) {
         var wireInst = instance
         wireInst.sessionID = sessionID
-        enqueueSessionOp(.addInstrument(.init(sessionID: sessionID, instance: wireInst)))
+        enqueueSessionOp(.addInstrument(.init(sessionID: sessionID, instance: wireInst, runtimeStatus: runtimeStatus)))
     }
 
-    public func enqueueUpdateInstrument(sessionID: UUID, instance: InstrumentInstance) {
+    public func enqueueUpdateInstrument(sessionID: UUID, instance: InstrumentInstance, runtimeStatus: InstrumentStatus? = nil) {
         var wireInst = instance
         wireInst.sessionID = sessionID
-        enqueueSessionOp(.updateInstrument(.init(sessionID: sessionID, instance: wireInst)))
+        enqueueSessionOp(.updateInstrument(.init(sessionID: sessionID, instance: wireInst, runtimeStatus: runtimeStatus)))
     }
 
     public func enqueueRemoveInstrument(sessionID: UUID, instanceID: UUID) {

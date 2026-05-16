@@ -647,9 +647,18 @@ public final class Engine {
         !collaboration.isCollaborative || collaboration.isOwner
     }
 
+    private func broadcastInstrumentStatus(instanceID: UUID, sessionID: UUID) {
+        guard let instance = try? store.fetchInstrument(id: instanceID) else { return }
+        onSessionListChanged?(.instrumentUpdated(instance))
+        if localUserHosts(sessionID) {
+            broadcastInstrumentUpdate(instance)
+        }
+    }
+
     private func broadcastInstrumentUpdate(_ instance: InstrumentInstance) {
         guard localUserHosts(instance.sessionID) else { return }
-        collaboration.enqueueUpdateInstrument(sessionID: instance.sessionID, instance: instance)
+        let status = node(forSessionID: instance.sessionID)?.instruments.first(where: { $0.id == instance.id })?.status
+        collaboration.enqueueUpdateInstrument(sessionID: instance.sessionID, instance: instance, runtimeStatus: status)
     }
 
     private func handleRemoteReplEvalRequest(sessionID: UUID, code: String, cellID: UUID) {
@@ -745,7 +754,8 @@ public final class Engine {
             collaboration.enqueueAddReplCell(sessionID: sessionID, cell: cell)
         }
         for instance in (try? store.fetchInstruments(sessionID: sessionID)) ?? [] {
-            collaboration.enqueueAddInstrument(sessionID: sessionID, instance: instance)
+            let status = node(forSessionID: sessionID)?.instruments.first(where: { $0.id == instance.id })?.status
+            collaboration.enqueueAddInstrument(sessionID: sessionID, instance: instance, runtimeStatus: status)
         }
         for insight in (try? store.fetchInsights(sessionID: sessionID)) ?? [] {
             collaboration.enqueueAddInsight(sessionID: sessionID, insight: insight)
@@ -2257,8 +2267,10 @@ public final class Engine {
             do {
                 let paths = try compilerWorkspacePaths()
                 configObject = try await compileTracerConfig(config, paths: paths)
+                broadcastInstrumentStatus(instanceID: inst.id, sessionID: node.sessionID)
             } catch {
-                print("[Engine] Failed to compile tracer config: \(String(describing: error)))")
+                node.setInstrumentStatus(id: inst.id, .from(error: error, kind: .configInvalid))
+                broadcastInstrumentStatus(instanceID: inst.id, sessionID: node.sessionID)
                 return
             }
 
@@ -2280,8 +2292,11 @@ public final class Engine {
 
         do {
             try await node.pushInstrumentConfig(instanceID: inst.id, config: configObject)
+            node.clearInstrumentStatus(id: inst.id)
+            broadcastInstrumentStatus(instanceID: inst.id, sessionID: node.sessionID)
         } catch {
-            print("[Engine] Failed to update instrument config: \(String(describing: error)))")
+            node.setInstrumentStatus(id: inst.id, .from(error: error, kind: .configInvalid))
+            broadcastInstrumentStatus(instanceID: inst.id, sessionID: node.sessionID)
         }
 
         if inst.kind == .tracer {
@@ -2344,8 +2359,10 @@ public final class Engine {
             }
 
             node.markInstrumentAttached(id: instanceID)
+            broadcastInstrumentStatus(instanceID: instanceID, sessionID: node.sessionID)
         } catch {
-            print("[Engine] Failed to load instrument \(instanceID.uuidString): \(String(describing: error)))")
+            node.setInstrumentStatus(id: instanceID, .from(error: error, kind: .load))
+            broadcastInstrumentStatus(instanceID: instanceID, sessionID: node.sessionID)
         }
     }
 
@@ -2367,6 +2384,7 @@ public final class Engine {
             return false
         }
         node.setInstrumentStatus(id: instanceID, .incompatible(reason: reason))
+        broadcastInstrumentStatus(instanceID: instanceID, sessionID: node.sessionID)
         return true
     }
 
@@ -3299,8 +3317,10 @@ public final class Engine {
                         on: node
                     )
                     node.markInstrumentAttached(id: liveInstance.id)
+                    broadcastInstrumentStatus(instanceID: liveInstance.id, sessionID: node.sessionID)
                 } catch {
-                    print("[Engine] Failed to reload custom instance \(liveInstance.id): \(error)")
+                    node.setInstrumentStatus(id: liveInstance.id, .from(error: error, kind: .reload))
+                    broadcastInstrumentStatus(instanceID: liveInstance.id, sessionID: node.sessionID)
                 }
                 onSessionListChanged?(.instrumentUpdated(liveInstance))
             }

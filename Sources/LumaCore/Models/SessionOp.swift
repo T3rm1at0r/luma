@@ -251,11 +251,18 @@ public enum SessionOp: Sendable {
         public let opID: UUID
         public let sessionID: UUID
         public let instance: InstrumentInstance
+        public let runtimeStatus: InstrumentStatus?
 
-        public init(opID: UUID = UUID(), sessionID: UUID, instance: InstrumentInstance) {
+        public init(
+            opID: UUID = UUID(),
+            sessionID: UUID,
+            instance: InstrumentInstance,
+            runtimeStatus: InstrumentStatus? = nil
+        ) {
             self.opID = opID
             self.sessionID = sessionID
             self.instance = instance
+            self.runtimeStatus = runtimeStatus
         }
     }
 
@@ -263,11 +270,18 @@ public enum SessionOp: Sendable {
         public let opID: UUID
         public let sessionID: UUID
         public let instance: InstrumentInstance
+        public let runtimeStatus: InstrumentStatus?
 
-        public init(opID: UUID = UUID(), sessionID: UUID, instance: InstrumentInstance) {
+        public init(
+            opID: UUID = UUID(),
+            sessionID: UUID,
+            instance: InstrumentInstance,
+            runtimeStatus: InstrumentStatus? = nil
+        ) {
             self.opID = opID
             self.sessionID = sessionID
             self.instance = instance
+            self.runtimeStatus = runtimeStatus
         }
     }
 
@@ -406,11 +420,11 @@ public enum SessionOp: Sendable {
                 obj["cell"] = cellObj
             }
         case .addInstrument(let a):
-            if let instObj = a.instance.toWireJSON() {
+            if let instObj = Self.wireInstrument(instance: a.instance, runtimeStatus: a.runtimeStatus) {
                 obj["instance"] = instObj
             }
         case .updateInstrument(let u):
-            if let instObj = u.instance.toWireJSON() {
+            if let instObj = Self.wireInstrument(instance: u.instance, runtimeStatus: u.runtimeStatus) {
                 obj["instance"] = instObj
             }
         case .removeInstrument(let r):
@@ -570,22 +584,24 @@ public enum SessionOp: Sendable {
 
         case "add-instrument":
             guard let instObj = obj["instance"] as? [String: Any],
-                let inst = InstrumentInstance.fromWireJSON(instObj)
+                let parsed = Self.parseWireInstrument(instObj)
             else { return nil }
             return .addInstrument(AddInstrument(
                 opID: opID,
                 sessionID: sessionID,
-                instance: inst
+                instance: parsed.instance,
+                runtimeStatus: parsed.runtimeStatus
             ))
 
         case "update-instrument":
             guard let instObj = obj["instance"] as? [String: Any],
-                let inst = InstrumentInstance.fromWireJSON(instObj)
+                let parsed = Self.parseWireInstrument(instObj)
             else { return nil }
             return .updateInstrument(UpdateInstrument(
                 opID: opID,
                 sessionID: sessionID,
-                instance: inst
+                instance: parsed.instance,
+                runtimeStatus: parsed.runtimeStatus
             ))
 
         case "remove-instrument":
@@ -656,6 +672,22 @@ public enum SessionOp: Sendable {
         default:
             return nil
         }
+    }
+
+    private static func wireInstrument(instance: InstrumentInstance, runtimeStatus: InstrumentStatus?) -> [String: Any]? {
+        guard var obj = instance.toWireJSON() else { return nil }
+        if let runtimeStatus {
+            obj["runtime_status"] = runtimeStatus.toWireJSON()
+        }
+        return obj
+    }
+
+    private static func parseWireInstrument(_ obj: [String: Any]) -> (instance: InstrumentInstance, runtimeStatus: InstrumentStatus?)? {
+        var stripped = obj
+        let statusObj = stripped.removeValue(forKey: "runtime_status") as? [String: Any]
+        guard let instance = InstrumentInstance.fromWireJSON(stripped) else { return nil }
+        let status = statusObj.flatMap(InstrumentStatus.fromWireJSON)
+        return (instance, status)
     }
 }
 
