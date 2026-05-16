@@ -25,7 +25,8 @@ struct HookPackUI: InstrumentUI {
             HookPackConfigView(
                 pack: pack,
                 config: cfgBinding,
-                engine: engine
+                engine: engine,
+                selection: selection
             )
         )
     }

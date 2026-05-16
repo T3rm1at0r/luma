@@ -40,7 +40,11 @@ struct CustomInstrumentConfigView: View {
             }
 
             if let def {
-                InstrumentWidgetsRenderer(widgets: def.widgets, engine: engine)
+                InstrumentWidgetsRenderer(
+                    widgets: def.widgets,
+                    engine: engine,
+                    selection: $selection
+                )
             }
 
             Spacer()

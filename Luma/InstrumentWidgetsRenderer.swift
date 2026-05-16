@@ -5,6 +5,7 @@ import SwiftUI
 struct InstrumentWidgetsRenderer: View {
     let widgets: [InstrumentWidget]
     let engine: Engine
+    var selection: Binding<SidebarItemID?> = .constant(nil)
     @Environment(\.instrumentInstance) private var instance: LumaCore.InstrumentInstance?
 
     var body: some View {
@@ -14,9 +15,14 @@ struct InstrumentWidgetsRenderer: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(widgets) { widget in
                     GroupBox {
-                        WidgetCanvas(widget: widget, instance: instance, engine: engine)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .disabled(instance == nil)
+                        WidgetCanvas(
+                            widget: widget,
+                            instance: instance,
+                            engine: engine,
+                            selection: selection
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .disabled(instance == nil)
                     } label: {
                         widgetHeader(widget: widget)
                     }
@@ -47,6 +53,7 @@ private struct WidgetCanvas: View {
     let widget: InstrumentWidget
     let instance: LumaCore.InstrumentInstance?
     let engine: Engine
+    let selection: Binding<SidebarItemID?>
 
     @State private var state = WidgetState()
 
@@ -77,6 +84,9 @@ private struct WidgetCanvas: View {
         ConsoleWidgetView(
             entries: state.consoleEntries,
             config: cfg,
+            sessionID: instance?.sessionID ?? UUID(),
+            engine: engine,
+            selection: selection,
             onSubmit: { text in submitConsoleInput(text: text) }
         )
     }
@@ -290,6 +300,9 @@ private struct WidgetCanvas: View {
 private struct ConsoleWidgetView: View {
     let entries: [WidgetConsoleEntry]
     let config: InstrumentWidget.ConsoleConfig
+    let sessionID: UUID
+    let engine: Engine
+    let selection: Binding<SidebarItemID?>
     let onSubmit: (String) -> Void
 
     @State private var draft: String = ""
@@ -301,30 +314,36 @@ private struct ConsoleWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        if entries.isEmpty {
-                            Text("No entries.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            GeometryReader { geo in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(entries) { entry in
+                                entryRow(entry)
+                                    .id(entry.id)
+                            }
+                            Color.clear
+                                .frame(height: 1)
+                                .id(Self.bottomAnchorID)
                         }
-                        ForEach(entries) { entry in
-                            entryRow(entry)
-                                .id(entry.id)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: geo.size.height,
+                            alignment: .bottomLeading
+                        )
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .onChange(of: entries.count) { _, _ in
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 220)
-                .onChange(of: entries.count) { _, _ in
-                    if let last = entries.last?.id {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo(last, anchor: .bottom)
-                        }
+                    .onAppear {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                     }
                 }
             }
+            .frame(minHeight: 80, maxHeight: 220)
 
             HStack(spacing: 6) {
                 Text(promptGlyph)
@@ -340,23 +359,44 @@ private struct ConsoleWidgetView: View {
         }
     }
 
+    private static let bottomAnchorID = "luma-console-bottom"
+
     private func entryRow(_ entry: WidgetConsoleEntry) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            switch entry.kind {
-            case .input:
-                Text(promptGlyph)
-                    .foregroundStyle(.secondary)
-            case .output:
-                Text(" ")
-            case .error:
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-            }
+            entryKindGlyph(entry.kind)
+            entryBody(entry)
+        }
+        .font(.system(.caption, design: .monospaced))
+    }
+
+    @ViewBuilder
+    private func entryKindGlyph(_ kind: WidgetConsoleEntry.Kind) -> some View {
+        switch kind {
+        case .input:
+            Text(promptGlyph)
+                .foregroundStyle(.secondary)
+        case .output:
+            Text(" ")
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+        }
+    }
+
+    @ViewBuilder
+    private func entryBody(_ entry: WidgetConsoleEntry) -> some View {
+        if let value = entry.value {
+            JSInspectValueView(
+                value: value,
+                sessionID: sessionID,
+                engine: engine,
+                selection: selection
+            )
+        } else {
             Text(entry.text)
                 .foregroundStyle(entry.kind == .error ? Color.red : .primary)
                 .textSelection(.enabled)
         }
-        .font(.system(.caption, design: .monospaced))
     }
 
     private var canSubmit: Bool {

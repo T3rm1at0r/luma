@@ -5,6 +5,7 @@ struct HookPackConfigView: View {
     let pack: HookPack
     @Binding var config: HookPackConfig
     let engine: Engine
+    @Binding var selection: SidebarItemID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -36,7 +37,11 @@ struct HookPackConfigView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            InstrumentWidgetsRenderer(widgets: pack.manifest.widgets, engine: engine)
+            InstrumentWidgetsRenderer(
+                widgets: pack.manifest.widgets,
+                engine: engine,
+                selection: $selection
+            )
 
             Spacer()
         }
