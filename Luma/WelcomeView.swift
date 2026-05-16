@@ -28,8 +28,15 @@ struct WelcomeView: View {
                     WelcomeBackdrop()
                 }
         #else
-            ScrollView {
-                stack(topPadding: 32, bottomPadding: 32)
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        stack(topPadding: 0, bottomPadding: 0)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: proxy.size.height)
+                }
             }
             .background {
                 WelcomeBackdrop().ignoresSafeArea()
