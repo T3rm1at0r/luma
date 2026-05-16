@@ -291,9 +291,10 @@ extension EditorCustomTheme {
             "editorSuggestWidget.selectedBackground": "#0969DA1F",
             "editorHoverWidget.background": "#FFFFFF",
             "editorHoverWidget.border": "#D0D7DE",
-            "scrollbarSlider.background": "#8C959F40",
-            "scrollbarSlider.hoverBackground": "#8C959F66",
-            "scrollbarSlider.activeBackground": "#8C959F99",
+            "scrollbar.shadow": "#1F232833",
+            "scrollbarSlider.background": "#57606A80",
+            "scrollbarSlider.hoverBackground": "#57606AB3",
+            "scrollbarSlider.activeBackground": "#57606AE6",
         ]
     )
 
