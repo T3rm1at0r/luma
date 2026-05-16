@@ -3362,6 +3362,59 @@ public final class Engine {
         text: String
     ) async {
         let entry = WidgetConsoleEntry(kind: .input, text: text)
+        await dispatchConsoleInput(instance: instance, widget: widget, entry: entry)
+    }
+
+    public struct ConsoleResponse: Sendable {
+        public let inputEntryID: String
+        public let replies: [WidgetConsoleEntry]
+    }
+
+    /// Submits a console input and awaits replies tagged with `replyTo ==
+    /// inputEntry.id`. Returns as soon as the agent signals
+    /// `consoleReplyDone(inputEntryID)`, or when `timeout` elapses.
+    /// Intended for MCP-style request/response flows.
+    public func submitConsoleInputAndAwait(
+        instance: InstrumentInstance,
+        widget: String,
+        text: String,
+        timeout: Duration = .seconds(30)
+    ) async -> ConsoleResponse {
+        let entry = WidgetConsoleEntry(kind: .input, text: text)
+        let inputID = entry.id
+        let instanceID = instance.id
+        let updates = widgetUpdates
+        await dispatchConsoleInput(instance: instance, widget: widget, entry: entry)
+
+        let buffer = ConsoleReplyBuffer()
+        let collector = Task { @MainActor in
+            for await update in updates {
+                if Task.isCancelled { return }
+                guard update.instanceID == instanceID, update.widget == widget else { continue }
+                switch update.kind {
+                case .consoleAppend(let candidate) where candidate.replyTo == inputID:
+                    await buffer.append(candidate)
+                case .consoleReplyDone(let id) where id == inputID:
+                    return
+                default:
+                    continue
+                }
+            }
+        }
+        let deadline = Task {
+            try? await Task.sleep(for: timeout)
+            collector.cancel()
+        }
+        _ = await collector.value
+        deadline.cancel()
+        return ConsoleResponse(inputEntryID: inputID, replies: await buffer.snapshot())
+    }
+
+    private func dispatchConsoleInput(
+        instance: InstrumentInstance,
+        widget: String,
+        entry: WidgetConsoleEntry
+    ) async {
         let update = WidgetUpdate(instanceID: instance.id, widget: widget, kind: .consoleAppend(entry))
         applyWidgetUpdate(update, sessionID: instance.sessionID, origin: .local)
 
@@ -3369,7 +3422,7 @@ public final class Engine {
             node.instruments.first(where: { $0.id == instance.id })?.attachment == .attached
         else { return }
         do {
-            try await node.submitConsoleInput(instanceID: instance.id, widget: widget, entryID: entry.id, text: text)
+            try await node.submitConsoleInput(instanceID: instance.id, widget: widget, entryID: entry.id, text: entry.text)
         } catch {
             emitEngineError(subsystem: "instruments", text: "Failed to submit console input on \(widget): \(userFacingMessage(error))")
         }
@@ -4352,6 +4405,18 @@ public final class Engine {
 
 public struct TracerHookCompileFailures: Swift.Error {
     public let hookErrors: [UUID: any Swift.Error]
+}
+
+private actor ConsoleReplyBuffer {
+    private var entries: [WidgetConsoleEntry] = []
+
+    func append(_ entry: WidgetConsoleEntry) {
+        entries.append(entry)
+    }
+
+    func snapshot() -> [WidgetConsoleEntry] {
+        entries
+    }
 }
 
 #if canImport(CryptoKit)
