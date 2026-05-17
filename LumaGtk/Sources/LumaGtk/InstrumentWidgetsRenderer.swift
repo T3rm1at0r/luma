@@ -305,9 +305,6 @@ private final class ConsoleWidget {
 
     private func makeRow(for entry: WidgetConsoleEntry) -> Widget {
         let row = Box(orientation: .horizontal, spacing: 8)
-        if entry.replyTo != nil {
-            row.marginStart = 16
-        }
         let glyph: String
         let bodyCssClass: String?
         switch entry.kind {

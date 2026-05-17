@@ -375,7 +375,6 @@ private struct ConsoleWidgetView: View {
             entryBody(entry)
         }
         .font(.system(.caption, design: .monospaced))
-        .padding(.leading, entry.replyTo == nil ? 0 : 16)
         .contextMenu {
             Button {
                 addToNotebook(entry)
