@@ -769,15 +769,21 @@ final class InsightDetailView {
 
     private func openNotePopover(anchoredAt anchor: Widget, address: UInt64) {
         guard let engine else { return }
-        let (originX, originY) = translatePoint(x: 0, y: 0, from: anchor, to: widget)
-        let rect = AddressNotePointingRect(
-            x: originX,
-            y: originY,
-            width: max(1, Double(anchor.width)),
-            height: max(1, Double(anchor.height))
-        )
         let popover = AddressNotePopover(engine: engine, sessionID: sessionID, address: address)
-        popover.presentAnchored(to: widget, pointingTo: rect)
+        popover.presentAnchored(to: anchor, pointingX: anchorContentWidth(anchor))
+    }
+
+    private func anchorContentWidth(_ anchor: Widget) -> Int {
+        if let label = anchor as? Label, let text = label.label {
+            let layoutPtr = gtk_widget_create_pango_layout(anchor.widget_ptr, text)
+            defer { if let p = layoutPtr { g_object_unref(p) } }
+            var w: Int32 = 0
+            if let layoutPtr {
+                pango_layout_get_pixel_size(layoutPtr, &w, nil)
+            }
+            if w > 0 { return Int(w) }
+        }
+        return Int(anchor.width)
     }
 
     private func goToFunctionStart(address: UInt64) async {

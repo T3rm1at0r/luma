@@ -6,14 +6,6 @@ import Gtk
 import LumaCore
 
 @MainActor
-struct AddressNotePointingRect {
-    let x: Double
-    let y: Double
-    let width: Double
-    let height: Double
-}
-
-@MainActor
 final class AddressNotePopover {
     private static var active: AddressNotePopover?
 
@@ -52,7 +44,7 @@ final class AddressNotePopover {
         self.address = address
     }
 
-    func presentAnchored(to parent: WidgetProtocol, pointingTo rect: AddressNotePointingRect) {
+    func presentAnchored(to anchor: WidgetProtocol, pointingX: Int) {
         AddressNotePopover.active?.dismiss()
         AddressNotePopover.active = self
 
@@ -92,16 +84,21 @@ final class AddressNotePopover {
         column.append(child: host)
 
         popover.set(child: column)
-        popover.set(parent: WidgetRef(parent))
+        popover.set(parent: WidgetRef(anchor))
 
+        // GTK4 places the popover arrow about one row pitch below pointing_to.y
+        // when the parent sits inside our disasm ScrolledWindow; bias the rect
+        // upward so the arrow lands on the row instead of the next one.
+        let arrowYBias = -22
+        let anchorHeight = max(1, Int(anchor.height))
         var gdkRect = GdkRectangle(
-            x: gint(rect.x),
-            y: gint(rect.y),
-            width: gint(max(1, rect.width)),
-            height: gint(max(1, rect.height))
+            x: gint(pointingX),
+            y: gint(anchorHeight / 2 + arrowYBias),
+            width: 1,
+            height: 1
         )
         withUnsafeMutablePointer(to: &gdkRect) { ptr in
-            gtk_popover_set_pointing_to(popover.popover_ptr, ptr)
+            popover.setPointingTo(rect: Gdk.RectangleRef(ptr))
         }
 
         self.popover = popover
