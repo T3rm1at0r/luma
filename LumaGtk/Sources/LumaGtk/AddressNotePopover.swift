@@ -34,7 +34,6 @@ final class AddressNotePopover {
     private var streamingRow: Widget?
     private var streamingBody: Label?
     private var streamingText: String = ""
-    private var stickyBottom: Bool = true
     private var errorLabel: Label?
 
     private var notes: [AddressNote] = []
@@ -91,14 +90,10 @@ final class AddressNotePopover {
         popover.set(child: column)
         popover.set(parent: WidgetRef(anchor))
 
-        // GTK4 places the popover arrow about one row pitch below pointing_to.y
-        // when the parent sits inside our disasm ScrolledWindow; bias the rect
-        // upward so the arrow lands on the row instead of the next one.
-        let arrowYBias = -22
         let anchorHeight = max(1, Int(anchor.height))
         var gdkRect = GdkRectangle(
             x: gint(pointingX),
-            y: gint(anchorHeight / 2 + arrowYBias),
+            y: gint(anchorHeight / 2),
             width: 1,
             height: 1
         )
@@ -314,11 +309,9 @@ final class AddressNotePopover {
             list.append(child: makeMessageRow(message))
         }
 
-        installScrollStickiness()
-        stickyBottom = true
-
         column.append(child: Separator(orientation: .horizontal))
         column.append(child: makeInputBar())
+        scrollToBottom()
         return column
     }
 
@@ -354,6 +347,7 @@ final class AddressNotePopover {
         let body = Label(str: "")
         body.setMarkup(str: MissionMarkdown.pangoMarkup(from: message.bodyMarkdown))
         body.wrap = true
+        body.naturalWrapMode = GTK_NATURAL_WRAP_WORD
         body.xalign = 0
         body.halign = .fill
         body.selectable = true
@@ -391,21 +385,6 @@ final class AddressNotePopover {
         entry.rightMargin = 8
         entry.acceptsTab = false
         inputView = entry
-
-        let submitKey = EventControllerKey()
-        submitKey.onKeyPressed { [weak self] _, keyval, _, state in
-            MainActor.assumeIsolated {
-                let key = Int32(keyval)
-                guard key == Gdk.keyReturn || key == Gdk.keyKPEnter else { return false }
-                if state.contains(.shiftMask) { return false }
-                guard let self else { return true }
-                if case .sending = self.pending { return true }
-                if self.draftText().isEmpty { return true }
-                self.askAI()
-                return true
-            }
-        }
-        entry.install(controller: submitKey)
 
         let scroll = ScrolledWindow()
         scroll.hexpand = true
@@ -480,17 +459,15 @@ final class AddressNotePopover {
     }
 
     private func scrollToBottom() {
-        if let adj = messagesScroll?.vadjustment {
+        Task { @MainActor [weak self] in
+            guard let scroll = self?.messagesScroll,
+                let box = self?.messagesBox,
+                let adj = scroll.vadjustment
+            else { return }
+            var natural: gint = 0
+            box.measure(orientation: GTK_ORIENTATION_VERTICAL, for: Int(box.width), natural: &natural)
+            adj.upper = Double(natural)
             adj.value = max(0, adj.upper - adj.pageSize)
-        }
-    }
-
-    private func installScrollStickiness() {
-        guard let adj = messagesScroll?.vadjustment else { return }
-        adj.onChanged { adj in
-            MainActor.assumeIsolated {
-                adj.value = max(0, adj.upper - adj.pageSize)
-            }
         }
     }
 
@@ -524,10 +501,21 @@ final class AddressNotePopover {
     }
 
     private func deleteActive() {
-        guard let engine, let id = activeNoteID, let note = notes.first(where: { $0.id == id }) else { return }
+        guard let id = activeNoteID, let note = notes.first(where: { $0.id == id }) else { return }
+        confirmDestructive(
+            heading: "Delete thread?",
+            body: "This will remove the thread and its messages from this address.",
+            destructiveLabel: "Delete"
+        ) { [weak self] in
+            self?.commitDeleteActive(note: note)
+        }
+    }
+
+    private func commitDeleteActive(note: AddressNote) {
+        guard let engine else { return }
         engine.deleteAddressNote(note)
-        notes.removeAll { $0.id == id }
-        unusedTransientNoteIDs.remove(id)
+        notes.removeAll { $0.id == note.id }
+        unusedTransientNoteIDs.remove(note.id)
         activeNoteID = notes.first?.id
         reloadMessages()
         if notes.isEmpty {
@@ -535,6 +523,22 @@ final class AddressNotePopover {
             return
         }
         rebuildBody()
+    }
+
+    private func confirmDestructive(heading: String, body: String, destructiveLabel: String, action: @escaping () -> Void) {
+        guard let anchor = popover?.parent else { return }
+        let dialog = Adw.AlertDialog(heading: heading, body: body)
+        dialog.addResponse(id: "cancel", label: "_Cancel")
+        dialog.addResponse(id: "confirm", label: destructiveLabel)
+        dialog.setResponseAppearance(response: "confirm", appearance: .destructive)
+        dialog.setDefault(response: "cancel")
+        dialog.setClose(response: "cancel")
+        dialog.onResponse { _, responseID in
+            MainActor.assumeIsolated {
+                if responseID == "confirm" { action() }
+            }
+        }
+        dialog.present(parent: WidgetRef(anchor))
     }
 
     private func saveNote() {
