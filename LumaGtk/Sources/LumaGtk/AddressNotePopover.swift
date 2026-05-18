@@ -211,7 +211,7 @@ final class AddressNotePopover {
             (try? node.resolveSyncIfReady(note.anchor)) == address
         }
         if activeNoteID == nil || !notes.contains(where: { $0.id == activeNoteID }) {
-            activeNoteID = notes.first?.id
+            activeNoteID = notes.last?.id
         }
         reloadMessages()
         rebuildBody()
@@ -257,13 +257,24 @@ final class AddressNotePopover {
         list.add(cssClass: "navigation-sidebar")
         for note in notes {
             let row = ListBoxRow()
+            let rowBox = Box(orientation: .horizontal, spacing: 6)
+            rowBox.marginStart = 10
+            rowBox.marginEnd = 10
+            rowBox.marginTop = 4
+            rowBox.marginBottom = 4
+
+            let check = Gtk.Image(iconName: "object-select-symbolic")
+            check.pixelSize = 12
+            check.opacity = note.id == activeNoteID ? 1.0 : 0.0
+            rowBox.append(child: check)
+
             let label = Label(str: noteTitle(note))
             label.halign = .start
-            label.marginStart = 10
-            label.marginEnd = 10
-            label.marginTop = 4
-            label.marginBottom = 4
-            row.set(child: label)
+            label.hexpand = true
+            label.xalign = 0
+            rowBox.append(child: label)
+
+            row.set(child: rowBox)
             list.append(child: row)
         }
         list.onRowActivated { [weak self] _, row in
@@ -648,7 +659,7 @@ final class AddressNotePopover {
 
     private func createNote() {
         guard let engine, let note = engine.createAddressNote(sessionID: sessionID, address: address) else { return }
-        notes.insert(note, at: 0)
+        notes.append(note)
         activeNoteID = note.id
         messages = []
         unusedTransientNoteIDs.insert(note.id)
@@ -752,7 +763,7 @@ final class AddressNotePopover {
         engine.deleteAddressNote(note)
         notes.removeAll { $0.id == note.id }
         unusedTransientNoteIDs.remove(note.id)
-        activeNoteID = notes.first?.id
+        activeNoteID = notes.last?.id
         reloadMessages()
         if notes.isEmpty {
             dismiss()

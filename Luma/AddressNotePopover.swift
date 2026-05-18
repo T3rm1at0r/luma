@@ -105,7 +105,11 @@ struct AddressNotePopover: View {
                         Button {
                             activeNoteID = note.id
                         } label: {
-                            Text(noteTitle(note))
+                            if note.id == activeNoteID {
+                                Label(noteTitle(note), systemImage: "checkmark")
+                            } else {
+                                Text(noteTitle(note))
+                            }
                         }
                     }
                 } label: {
@@ -299,7 +303,7 @@ struct AddressNotePopover: View {
         notes = engine.addressNotes(sessionID: sessionID)
             .filter { (try? engine.node(forSessionID: sessionID)?.resolveSyncIfReady($0.anchor)) == address }
         if activeNoteID == nil {
-            activeNoteID = notes.first?.id
+            activeNoteID = notes.last?.id
         }
         reloadMessages()
     }
@@ -311,7 +315,7 @@ struct AddressNotePopover: View {
 
     private func createNote() {
         guard let note = engine.createAddressNote(sessionID: sessionID, address: address) else { return }
-        notes.insert(note, at: 0)
+        notes.append(note)
         activeNoteID = note.id
         messages = []
         unusedTransientNoteIDs.insert(note.id)
@@ -322,7 +326,7 @@ struct AddressNotePopover: View {
         engine.deleteAddressNote(note)
         notes.removeAll { $0.id == note.id }
         unusedTransientNoteIDs.remove(note.id)
-        activeNoteID = notes.first?.id
+        activeNoteID = notes.last?.id
         reloadMessages()
         if notes.isEmpty {
             isPresented = false
