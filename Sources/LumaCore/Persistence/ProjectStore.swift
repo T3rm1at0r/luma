@@ -500,11 +500,11 @@ public final class ProjectStore: Sendable {
         }
     }
 
-    public func fetchModuleAnalysis(sessionID: UUID, moduleName: String) throws -> ModuleAnalysis? {
+    public func fetchModuleAnalysis(sessionID: UUID, modulePath: String) throws -> ModuleAnalysis? {
         try db.read { db in
             try ModuleAnalysis
                 .filter(Column("session_id") == sessionID)
-                .filter(Column("module_name") == moduleName)
+                .filter(Column("module_path") == modulePath)
                 .fetchOne(db)
         }
     }
@@ -515,18 +515,82 @@ public final class ProjectStore: Sendable {
         }
     }
 
-    public func fetchMemoryPage(sessionID: UUID, pageAddress: UInt64) throws -> MemoryPage? {
+    public func fetchMemoryPage(sessionID: UUID, moduleUUID: String, offset: UInt64) throws -> MemoryPageModule? {
         try db.read { db in
-            try MemoryPage
+            try MemoryPageModule
                 .filter(Column("session_id") == sessionID)
-                .filter(Column("page_address") == Int64(bitPattern: pageAddress))
+                .filter(Column("module_uuid") == moduleUUID)
+                .filter(Column("offset") == Int64(bitPattern: offset))
                 .fetchOne(db)
         }
     }
 
-    public func save(_ page: MemoryPage) throws {
+    public func save(_ page: MemoryPageModule) throws {
         try db.write { db in
             try page.save(db)
+        }
+    }
+
+    public func fetchMemoryPage(sessionID: UUID, processIdentity: String, address: UInt64) throws -> MemoryPageAnon? {
+        try db.read { db in
+            try MemoryPageAnon
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("process_identity") == processIdentity)
+                .filter(Column("address") == Int64(bitPattern: address))
+                .fetchOne(db)
+        }
+    }
+
+    public func save(_ page: MemoryPageAnon) throws {
+        try db.write { db in
+            try page.save(db)
+        }
+    }
+
+    public func deleteMemoryPage(sessionID: UUID, moduleUUID: String, offset: UInt64) throws {
+        try db.write { db in
+            _ = try MemoryPageModule
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("module_uuid") == moduleUUID)
+                .filter(Column("offset") == Int64(bitPattern: offset))
+                .deleteAll(db)
+        }
+    }
+
+    public func deleteMemoryPage(sessionID: UUID, processIdentity: String, address: UInt64) throws {
+        try db.write { db in
+            _ = try MemoryPageAnon
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("process_identity") == processIdentity)
+                .filter(Column("address") == Int64(bitPattern: address))
+                .deleteAll(db)
+        }
+    }
+
+    public func deleteMemoryPagesModule(sessionID: UUID, moduleUUID: String) throws {
+        try db.write { db in
+            _ = try MemoryPageModule
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("module_uuid") == moduleUUID)
+                .deleteAll(db)
+        }
+    }
+
+    public func deleteModuleAnalysis(sessionID: UUID, modulePath: String) throws {
+        try db.write { db in
+            _ = try ModuleAnalysis
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("module_path") == modulePath)
+                .deleteAll(db)
+        }
+    }
+
+    public func deleteMemoryPagesAnon(sessionID: UUID, exceptIdentity: String) throws {
+        try db.write { db in
+            _ = try MemoryPageAnon
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("process_identity") != exceptIdentity)
+                .deleteAll(db)
         }
     }
 
@@ -1301,25 +1365,35 @@ public final class ProjectStore: Sendable {
             t.column("created_at", .datetime).notNull()
         }
 
-        try db.create(table: "memory_page", ifNotExists: true) { t in
+        try db.create(table: "memory_page_module", ifNotExists: true) { t in
             t.column("session_id", .text).notNull()
                 .references("process_session", onDelete: .cascade)
-            t.column("page_address", .integer).notNull()
+            t.column("module_uuid", .text).notNull()
+            t.column("offset", .integer).notNull()
             t.column("bytes", .blob).notNull()
             t.column("captured_at", .datetime).notNull()
-            t.primaryKey(["session_id", "page_address"])
+            t.primaryKey(["session_id", "module_uuid", "offset"])
+        }
+
+        try db.create(table: "memory_page_anon", ifNotExists: true) { t in
+            t.column("session_id", .text).notNull()
+                .references("process_session", onDelete: .cascade)
+            t.column("process_identity", .text).notNull()
+            t.column("address", .integer).notNull()
+            t.column("bytes", .blob).notNull()
+            t.column("captured_at", .datetime).notNull()
+            t.primaryKey(["session_id", "process_identity", "address"])
         }
 
         try db.create(table: "module_analysis", ifNotExists: true) { t in
             t.column("session_id", .text).notNull()
                 .references("process_session", onDelete: .cascade)
-            t.column("module_name", .text).notNull()
+            t.column("module_path", .text).notNull()
             t.column("module_uuid", .text)
-            t.column("executable_ranges", .blob).notNull()
+            t.column("mapped_ranges", .blob).notNull()
             t.column("functions", .blob).notNull()
-            t.column("aap_done", .boolean).notNull()
             t.column("analyzed_at", .datetime).notNull()
-            t.primaryKey(["session_id", "module_name"])
+            t.primaryKey(["session_id", "module_path"])
         }
 
         try db.create(table: "remote_device_config", ifNotExists: true) { t in

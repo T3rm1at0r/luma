@@ -911,7 +911,6 @@ final class EventStreamPane {
             let parsed = Engine.parseTracerEvent(from: v),
             let sessionID = event.sessionID
         else { return nil }
-        let node = engine?.node(forSessionID: sessionID)
 
         let hookID = parsed.id
 

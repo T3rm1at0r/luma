@@ -78,15 +78,14 @@ struct DetailView: View {
                 }
 
             case .some(.insight(let sessionID, let insightID)):
-                let session = engine.sessions.first(where: { $0.id == sessionID })
-                if let session,
-                    let insight = (try? engine.store.fetchInsights(sessionID: sessionID))?.first(where: { $0.id == insightID })
+                if let session = engine.sessions.first(where: { $0.id == sessionID }),
+                    (engine.insightsBySession[sessionID] ?? []).contains(where: { $0.id == insightID })
                 {
                     SessionContent(sessionID: sessionID, engine: engine) {
                         AddressInsightDetailView(
-                            session: session, insight: insight, engine: engine, selection: $selection)
+                            session: session, insightID: insightID, engine: engine, selection: $selection)
                     }
-                    .id(insight.id)
+                    .id(insightID)
                 }
 
             case .some(.customInstrumentDef(let defID)):

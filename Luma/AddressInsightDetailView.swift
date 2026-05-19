@@ -3,9 +3,13 @@ import SwiftUI
 
 struct AddressInsightDetailView: View {
     let session: LumaCore.ProcessSession
-    @State var insight: LumaCore.AddressInsight
+    let insightID: UUID
     let engine: Engine
     @Binding var selection: SidebarItemID?
+
+    private var insight: LumaCore.AddressInsight? {
+        engine.insightsBySession[session.id]?.first { $0.id == insightID }
+    }
 
     @State private var refreshDebounce: Task<Void, Never>?
     @State private var refreshTask: Task<Void, Never>?
@@ -25,13 +29,14 @@ struct AddressInsightDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            refreshBar
             Group {
                 if let err = errorText {
                     Text(err)
                         .font(.system(.body, design: .monospaced))
                         .textSelection(.enabled)
-                } else {
-                    switch insight.kind {
+                } else if let kind = insight?.kind {
+                    switch kind {
                     case .memory:
                         ScrollView([.vertical]) {
                             HexView(data: memoryData)
@@ -67,6 +72,63 @@ struct AddressInsightDetailView: View {
         .onChange(of: node != nil) { _, attached in
             if attached { refresh() }
         }
+        .onChange(of: insight?.lastResolvedAddress) { _, _ in refresh() }
+    }
+
+    @ViewBuilder private var refreshBar: some View {
+        HStack(spacing: 6) {
+            Spacer()
+            Button {
+                rereadBytes()
+            } label: {
+                Label("Reread Bytes", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+            }
+            .help("Drop cached bytes for this view and refetch.")
+            .buttonStyle(.borderless)
+            .disabled(node == nil)
+
+            Button {
+                reanalyzeModule()
+            } label: {
+                Label("Reanalyze Module", systemImage: "arrow.triangle.2.circlepath")
+                    .labelStyle(.iconOnly)
+            }
+            .help("Drop disassembly analysis for this address's module.")
+            .buttonStyle(.borderless)
+            .disabled(node == nil || enclosingModule == nil)
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+    }
+
+    private var enclosingModule: LumaCore.ProcessModule? {
+        guard let insight else { return nil }
+        if let resolved = insight.lastResolvedAddress,
+            let module = engine.enclosingModule(at: resolved, sessionID: session.id)
+        {
+            return module
+        }
+        if case .moduleOffset(let name, _) = insight.anchor {
+            return engine.modulesSnapshot(forSessionID: session.id).first { $0.name == name }
+        }
+        return nil
+    }
+
+    private func rereadBytes() {
+        guard let insight, let resolved = insight.lastResolvedAddress else { return }
+        let sessionID = session.id
+        let byteCount = insight.byteCount
+        Task { @MainActor in
+            await engine.invalidateInsightRange(sessionID: sessionID, address: resolved, byteCount: byteCount)
+            refresh()
+        }
+    }
+
+    private func reanalyzeModule() {
+        guard let module = enclosingModule else { return }
+        engine.invalidateModule(sessionID: session.id, modulePath: module.path)
+        refresh()
     }
 
     private func refresh() {
@@ -81,6 +143,8 @@ struct AddressInsightDetailView: View {
     }
 
     private func doRefresh() {
+        guard let snapshot = insight else { return }
+
         refreshTask?.cancel()
         spinnerTask?.cancel()
         showRefreshSpinner = false
@@ -96,9 +160,10 @@ struct AddressInsightDetailView: View {
             }
         }
 
-        let kind = insight.kind
-        let byteCount = insight.byteCount
-        let anchor = insight.anchor
+        let kind = snapshot.kind
+        let byteCount = snapshot.byteCount
+        let anchor = snapshot.anchor
+        let hint = snapshot.lastResolvedAddress
         let reader = engine.memoryReader(forSessionID: session.id)
 
         refreshTask = Task { @MainActor in
@@ -107,13 +172,13 @@ struct AddressInsightDetailView: View {
                 showRefreshSpinner = false
             }
 
-            guard let resolved = await engine.resolve(sessionID: session.id, anchor: anchor, hint: insight.lastResolvedAddress) else {
+            guard let resolved = await engine.resolve(sessionID: session.id, anchor: anchor, hint: hint) else {
                 if Task.isCancelled { return }
                 errorText = AttributedString("Unable to resolve address while detached.")
                 return
             }
             if Task.isCancelled { return }
-            insight.lastResolvedAddress = resolved
+            engine.recordInsightResolution(snapshot, resolved: resolved)
 
             switch kind {
             case .memory:
@@ -129,6 +194,16 @@ struct AddressInsightDetailView: View {
                 }
 
             case .disassembly:
+                do {
+                    _ = try await reader.read(at: resolved, count: 1)
+                } catch {
+                    if Task.isCancelled { return }
+                    disasmLines = []
+                    memoryData = Data()
+                    errorText = AttributedString(error.localizedDescription)
+                    return
+                }
+
                 let page = await fetchDisasmPage(start: resolved, count: 64)
                 if Task.isCancelled { return }
 
@@ -141,7 +216,7 @@ struct AddressInsightDetailView: View {
 
     private func loadMoreDisasm() {
         guard !isLoadingMore else { return }
-        guard insight.kind == .disassembly else { return }
+        guard insight?.kind == .disassembly else { return }
         guard disasmScope == .span else { return }
         guard let last = disasmLines.last else { return }
 

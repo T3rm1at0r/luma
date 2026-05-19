@@ -50,6 +50,8 @@ public final class Disassembler {
     private let introspector: ModuleIntrospector
     private let reader: MemoryReader
 
+    public var onAnalysisSaved: ((ModuleAnalysis) -> Void)?
+
     private var r2: R2Core!
     private var openTask: Task<Void, Never>?
     private var currentDarkMode: Bool?
@@ -69,6 +71,10 @@ public final class Disassembler {
         self.modulesProvider = modulesProvider
         self.introspector = introspector
         self.reader = reader
+    }
+
+    public func forgetModule(path: String) {
+        analyzedModules.remove(path)
     }
 
     public func disassemble(_ request: DisassemblyRequest) async -> [DisassemblyLine] {
@@ -141,36 +147,51 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
     }
 
     private func ensureModuleAnalyzed(module: ProcessModule) async {
-        if analyzedModules.contains(module.name) { return }
+        if analyzedModules.contains(module.path) { return }
 
-        let identity = try? await introspector.getModuleIdentity(name: module.name)
+        let identity = try? await introspector.getModuleIdentity(name: module.path)
 
-        if let existing = try? store.fetchModuleAnalysis(sessionID: sessionID, moduleName: module.name),
-            existing.moduleUUID == identity
+        if let existing = try? store.fetchModuleAnalysis(sessionID: sessionID, modulePath: module.path),
+            canReuse(existing, currentIdentity: identity),
+            !existing.functions.isEmpty
         {
-            analyzedModules.insert(module.name)
+            analyzedModules.insert(module.path)
             await replayAnalysis(existing, module: module)
             return
         }
 
         guard introspector.isAvailable else { return }
-        analyzedModules.insert(module.name)
+        analyzedModules.insert(module.path)
 
-        let ranges = (try? await introspector.enumerateModuleRanges(name: module.name)) ?? []
-        let bundle = try? await introspector.enumerateModuleSymbols(name: module.name)
+        let ranges = (try? await introspector.enumerateModuleRanges(name: module.path)) ?? []
+        let stub = ModuleAnalysis(
+            sessionID: sessionID,
+            modulePath: module.path,
+            moduleUUID: identity,
+            mappedRanges: ranges,
+            functions: []
+        )
+        try? store.save(stub)
 
-        let functions = await registerKnownFunctions(bundle: bundle, module: module)
+        let bundle = try? await introspector.enumerateModuleSymbols(name: module.path)
+        var functions = await registerKnownFunctions(bundle: bundle, module: module)
         await runBoundedPreludeScan(ranges: ranges, module: module)
+        await harvestPreludeFunctions(module: module, into: &functions)
 
         let analysis = ModuleAnalysis(
             sessionID: sessionID,
-            moduleName: module.name,
+            modulePath: module.path,
             moduleUUID: identity,
-            executableRanges: ranges.map { .init(offset: $0.offset, size: $0.size) },
-            functions: functions,
-            aapDone: true
+            mappedRanges: ranges,
+            functions: functions
         )
         try? store.save(analysis)
+        onAnalysisSaved?(analysis)
+    }
+
+    private func canReuse(_ analysis: ModuleAnalysis, currentIdentity: String?) -> Bool {
+        guard let currentIdentity else { return true }
+        return analysis.moduleUUID == currentIdentity
     }
 
     private func replayAnalysis(_ analysis: ModuleAnalysis, module: ProcessModule) async {
@@ -195,7 +216,7 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
             seenOffsets.insert(offset)
         }
         for symbol in bundle.symbols where symbol.isCode {
-            guard symbol.address >= lo, symbol.address < hi else { continue }
+            guard symbol.address > lo, symbol.address < hi else { continue }
             let offset = symbol.address &- lo
             if seenOffsets.contains(offset) { continue }
             await defineFunction(at: symbol.address, name: symbol.name)
@@ -206,7 +227,7 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
     }
 
     private func runBoundedPreludeScan(ranges: [ProcessNode.ModuleRange], module: ProcessModule) async {
-        for range in ranges {
+        for range in ranges where range.protection.contains("x") {
             let lo = module.base &+ range.offset
             let hi = lo &+ range.size
             _ = await r2.cmd("e search.from=0x\(String(lo, radix: 16))")
@@ -215,14 +236,26 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         }
     }
 
+    private func harvestPreludeFunctions(module: ProcessModule, into functions: inout [ModuleAnalysis.Function]) async {
+        let raw = await r2.cmd("aflj")
+        guard let entries = try? JSONDecoder().decode([R2FunctionEntry].self, from: Data(raw.utf8)) else { return }
+        let lo = module.base
+        let hi = module.base &+ module.size
+        var seen = Set(functions.map(\.offset))
+        for entry in entries {
+            guard entry.offset >= lo, entry.offset < hi else { continue }
+            let offset = entry.offset &- lo
+            if seen.contains(offset) { continue }
+            seen.insert(offset)
+            functions.append(.init(offset: offset, name: nil, source: .prelude))
+        }
+    }
+
     private func defineFunction(at address: UInt64, name: String?) async {
         guard address != 0 else { return }
         let hex = String(address, radix: 16)
-        if let name, !name.isEmpty {
-            _ = await r2.cmd("af 0x\(hex) \(r2FlagSafe(name))")
-        } else {
-            _ = await r2.cmd("af 0x\(hex)")
-        }
+        let flag = (name?.isEmpty == false) ? r2FlagSafe(name!) : "fcn.\(hex)"
+        _ = await r2.cmd("af \(flag) 0x\(hex)")
     }
 
     private func r2FlagSafe(_ name: String) -> String {
@@ -306,14 +339,33 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
 }
 
 @MainActor
+public protocol PageKeying: AnyObject {
+    func attribution(pageBase: UInt64) async -> PageAttribution
+    func moduleUUID(forPath path: String) async -> String?
+    var processIdentity: String? { get }
+}
+
+public enum PageAttribution: Sendable {
+    case module(ProcessModule)
+    case anonymous
+    case ephemeral
+}
+
+@MainActor
 public final class CachingMemoryReader: MemoryReader {
     private let sessionID: UUID
     private let store: ProjectStore
+    private let keying: PageKeying
     public var live: MemoryReader?
+    public var publish: ((MemoryPagePublish) -> Void)?
+    public var fetchRemote: ((MemoryPageRegion) async -> Data?)?
 
-    public init(sessionID: UUID, store: ProjectStore, live: MemoryReader?) {
+    private var ephemeralCache: [UInt64: Data] = [:]
+
+    public init(sessionID: UUID, store: ProjectStore, keying: PageKeying, live: MemoryReader?) {
         self.sessionID = sessionID
         self.store = store
+        self.keying = keying
         self.live = live
     }
 
@@ -325,9 +377,9 @@ public final class CachingMemoryReader: MemoryReader {
         var cursor = address
         while cursor < end {
             let page = try await pageContaining(address: cursor)
-            let pageEnd = page.address &+ UInt64(page.bytes.count)
+            let pageEnd = page.base &+ UInt64(page.bytes.count)
             let copyEnd = min(end, pageEnd)
-            let offsetInPage = Int(cursor &- page.address)
+            let offsetInPage = Int(cursor &- page.base)
             let copyCount = Int(copyEnd &- cursor)
             let slice = page.bytes.subdata(in: offsetInPage..<(offsetInPage + copyCount))
             output.append(contentsOf: slice)
@@ -337,21 +389,90 @@ public final class CachingMemoryReader: MemoryReader {
     }
 
     private func pageContaining(address: UInt64) async throws -> ResolvedPage {
-        let base = MemoryPage.pageBase(of: address)
-        if let cached = try? store.fetchMemoryPage(sessionID: sessionID, pageAddress: base) {
-            return ResolvedPage(address: base, bytes: cached.bytes)
+        let key = await pageKey(for: address)
+        if let bytes = cachedBytes(for: key) {
+            return ResolvedPage(base: key.pageBase, bytes: bytes)
+        }
+        if let remote = try await fetchRemoteBytes(for: key) {
+            persist(key, bytes: remote, publishToRoom: false)
+            return ResolvedPage(base: key.pageBase, bytes: remote)
         }
         guard let live else {
-            throw DisassemblyError.notCached(pageAddress: base)
+            throw DisassemblyError.notCached(pageAddress: key.pageBase)
         }
-        let raw = try await live.read(at: base, count: Int(MemoryPage.pageSize))
-        let data = Data(raw)
-        try? store.save(MemoryPage(sessionID: sessionID, pageAddress: base, bytes: data))
-        return ResolvedPage(address: base, bytes: data)
+        let raw = try await live.read(at: key.pageBase, count: Int(MemoryPage.size))
+        let bytes = Data(raw)
+        persist(key, bytes: bytes, publishToRoom: true)
+        return ResolvedPage(base: key.pageBase, bytes: bytes)
+    }
+
+    private func ephemeralBytes(at pageBase: UInt64) -> Data? {
+        ephemeralCache[pageBase]
+    }
+
+    private func fetchRemoteBytes(for key: PageKey) async throws -> Data? {
+        guard let fetchRemote, case .mapped(let region) = key.region else { return nil }
+        return await fetchRemote(region)
+    }
+
+    private func pageKey(for address: UInt64) async -> PageKey {
+        let base = MemoryPage.base(of: address)
+        switch await keying.attribution(pageBase: base) {
+        case .module(let module):
+            guard let uuid = await keying.moduleUUID(forPath: module.path) else {
+                return PageKey(pageBase: base, region: .ephemeral)
+            }
+            return PageKey(pageBase: base, region: .mapped(.module(uuid: uuid, offset: base &- module.base)))
+        case .anonymous:
+            guard let identity = keying.processIdentity else {
+                return PageKey(pageBase: base, region: .ephemeral)
+            }
+            return PageKey(pageBase: base, region: .mapped(.anonymous(identity: identity, address: base)))
+        case .ephemeral:
+            return PageKey(pageBase: base, region: .ephemeral)
+        }
+    }
+
+    private func cachedBytes(for key: PageKey) -> Data? {
+        guard case .mapped(let region) = key.region else {
+            return ephemeralBytes(at: key.pageBase)
+        }
+        switch region {
+        case .module(let uuid, let offset):
+            return (try? store.fetchMemoryPage(sessionID: sessionID, moduleUUID: uuid, offset: offset))?.bytes
+        case .anonymous(let identity, let address):
+            return (try? store.fetchMemoryPage(sessionID: sessionID, processIdentity: identity, address: address))?.bytes
+        }
+    }
+
+    private func persist(_ key: PageKey, bytes: Data, publishToRoom: Bool) {
+        guard case .mapped(let region) = key.region else {
+            ephemeralCache[key.pageBase] = bytes
+            return
+        }
+        switch region {
+        case .module(let uuid, let offset):
+            try? store.save(MemoryPageModule(sessionID: sessionID, moduleUUID: uuid, offset: offset, bytes: bytes))
+        case .anonymous(let identity, let address):
+            try? store.save(MemoryPageAnon(sessionID: sessionID, processIdentity: identity, address: address, bytes: bytes))
+        }
+        if publishToRoom {
+            publish?(MemoryPagePublish(region: region, bytes: bytes))
+        }
+    }
+
+    private struct PageKey {
+        let pageBase: UInt64
+        let region: Region
+
+        enum Region {
+            case mapped(MemoryPageRegion)
+            case ephemeral
+        }
     }
 
     private struct ResolvedPage {
-        let address: UInt64
+        let base: UInt64
         let bytes: Data
     }
 }
@@ -418,6 +539,10 @@ private struct FridaMemURI {
         guard raw.hasPrefix("0x"), let base = UInt64(raw.dropFirst(2), radix: 16) else { return nil }
         return FridaMemURI(baseAddress: base)
     }
+}
+
+private struct R2FunctionEntry: Decodable {
+    let offset: UInt64
 }
 
 private struct R2DisasmOp: Decodable {

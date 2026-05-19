@@ -75,7 +75,10 @@ public struct ModuleSymbolBundle: Sendable {
         }
 
         public var isCode: Bool {
-            type == "function"
+            if type == "undefined" { return false }
+            if type == "function" { return true }
+            if let prot = sectionProtection, prot.contains("x") { return true }
+            return false
         }
 
         public var isData: Bool {

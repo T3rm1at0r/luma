@@ -8,8 +8,10 @@ import Foundation
 public enum SessionOp: Sendable {
     case add(Add)
     case updatePhase(UpdatePhase)
+    case updateProcessInfo(UpdateProcessInfo)
     case updateArming(UpdateArming)
     case updateModules(UpdateModules)
+    case updateModuleAnalysis(UpdateModuleAnalysis)
     case updateThreads(UpdateThreads)
     case claimHost(ClaimHost)
     case claimDriver(ClaimDriver)
@@ -18,6 +20,7 @@ public enum SessionOp: Sendable {
     case updateInstrument(UpdateInstrument)
     case removeInstrument(RemoveInstrument)
     case addInsight(AddInsight)
+    case updateInsight(UpdateInsight)
     case removeInsight(RemoveInsight)
     case upsertTrace(UpsertTrace)
     case removeTrace(RemoveTrace)
@@ -28,8 +31,10 @@ public enum SessionOp: Sendable {
         switch self {
         case .add(let a): return a.opID
         case .updatePhase(let u): return u.opID
+        case .updateProcessInfo(let u): return u.opID
         case .updateArming(let u): return u.opID
         case .updateModules(let u): return u.opID
+        case .updateModuleAnalysis(let u): return u.opID
         case .updateThreads(let u): return u.opID
         case .claimHost(let c): return c.opID
         case .claimDriver(let c): return c.opID
@@ -38,6 +43,7 @@ public enum SessionOp: Sendable {
         case .updateInstrument(let u): return u.opID
         case .removeInstrument(let r): return r.opID
         case .addInsight(let a): return a.opID
+        case .updateInsight(let u): return u.opID
         case .removeInsight(let r): return r.opID
         case .upsertTrace(let u): return u.opID
         case .removeTrace(let r): return r.opID
@@ -50,8 +56,10 @@ public enum SessionOp: Sendable {
         switch self {
         case .add(let a): return a.sessionID
         case .updatePhase(let u): return u.sessionID
+        case .updateProcessInfo(let u): return u.sessionID
         case .updateArming(let u): return u.sessionID
         case .updateModules(let u): return u.sessionID
+        case .updateModuleAnalysis(let u): return u.sessionID
         case .updateThreads(let u): return u.sessionID
         case .claimHost(let c): return c.sessionID
         case .claimDriver(let c): return c.sessionID
@@ -60,6 +68,7 @@ public enum SessionOp: Sendable {
         case .updateInstrument(let u): return u.sessionID
         case .removeInstrument(let r): return r.sessionID
         case .addInsight(let a): return a.sessionID
+        case .updateInsight(let u): return u.sessionID
         case .removeInsight(let r): return r.sessionID
         case .upsertTrace(let u): return u.sessionID
         case .removeTrace(let r): return r.sessionID
@@ -72,8 +81,10 @@ public enum SessionOp: Sendable {
         switch self {
         case .add: return "add"
         case .updatePhase: return "update-phase"
+        case .updateProcessInfo: return "update-process-info"
         case .updateArming: return "update-arming"
         case .updateModules: return "update-modules"
+        case .updateModuleAnalysis: return "update-module-analysis"
         case .updateThreads: return "update-threads"
         case .claimHost: return "claim-host"
         case .claimDriver: return "claim-driver"
@@ -82,6 +93,7 @@ public enum SessionOp: Sendable {
         case .updateInstrument: return "update-instrument"
         case .removeInstrument: return "remove-instrument"
         case .addInsight: return "add-insight"
+        case .updateInsight: return "update-insight"
         case .removeInsight: return "remove-insight"
         case .upsertTrace: return "upsert-trace"
         case .removeTrace: return "remove-trace"
@@ -143,6 +155,18 @@ public enum SessionOp: Sendable {
         }
     }
 
+    public struct UpdateProcessInfo: Sendable {
+        public let opID: UUID
+        public let sessionID: UUID
+        public let info: ProcessSession.ProcessInfo
+
+        public init(opID: UUID = UUID(), sessionID: UUID, info: ProcessSession.ProcessInfo) {
+            self.opID = opID
+            self.sessionID = sessionID
+            self.info = info
+        }
+    }
+
     public struct UpdateArming: Sendable {
         public let opID: UUID
         public let sessionID: UUID
@@ -156,6 +180,18 @@ public enum SessionOp: Sendable {
             self.opID = opID
             self.sessionID = sessionID
             self.armingState = armingState
+        }
+    }
+
+    public struct UpdateModuleAnalysis: Sendable {
+        public let opID: UUID
+        public let sessionID: UUID
+        public let analysis: ModuleAnalysis
+
+        public init(opID: UUID = UUID(), sessionID: UUID, analysis: ModuleAnalysis) {
+            self.opID = opID
+            self.sessionID = sessionID
+            self.analysis = analysis
         }
     }
 
@@ -309,6 +345,18 @@ public enum SessionOp: Sendable {
         }
     }
 
+    public struct UpdateInsight: Sendable {
+        public let opID: UUID
+        public let sessionID: UUID
+        public let insight: AddressInsight
+
+        public init(opID: UUID = UUID(), sessionID: UUID, insight: AddressInsight) {
+            self.opID = opID
+            self.sessionID = sessionID
+            self.insight = insight
+        }
+    }
+
     public struct RemoveInsight: Sendable {
         public let opID: UUID
         public let sessionID: UUID
@@ -388,11 +436,20 @@ public enum SessionOp: Sendable {
             obj["phase"] = u.phase.rawValue
             obj["last_seen_at"] = u.lastSeenAt
             if let reason = u.reason { obj["reason"] = reason }
+        case .updateProcessInfo(let u):
+            obj["info"] = [
+                "platform": u.info.platform,
+                "arch": u.info.arch,
+                "pointer_size": u.info.pointerSize,
+                "identity": u.info.identity,
+            ]
         case .updateArming(let u):
             obj["arming_state"] = encodeArmingState(u.armingState)
         case .updateModules(let u):
             obj["added"] = u.delta.added.map { $0.toJSON() }
             obj["removed"] = u.delta.removed.map { $0.toJSON() }
+        case .updateModuleAnalysis(let u):
+            obj["analysis"] = u.analysis.toWireJSON() ?? [:]
         case .updateThreads(let u):
             obj["added"] = u.delta.added.map { $0.toJSON() }
             obj["removed"] = u.delta.removed.map { Int($0) }
@@ -431,6 +488,10 @@ public enum SessionOp: Sendable {
             obj["instance_id"] = r.instanceID.uuidString
         case .addInsight(let a):
             if let insightObj = a.insight.toWireJSON() {
+                obj["insight"] = insightObj
+            }
+        case .updateInsight(let u):
+            if let insightObj = u.insight.toWireJSON() {
                 obj["insight"] = insightObj
             }
         case .removeInsight(let r):
@@ -498,6 +559,21 @@ public enum SessionOp: Sendable {
                 lastSeenAt: lastSeenAt
             ))
 
+        case "update-process-info":
+            guard let infoObj = obj["info"] as? [String: Any],
+                let platform = infoObj["platform"] as? String,
+                let arch = infoObj["arch"] as? String,
+                let pointerSize = infoObj["pointer_size"] as? Int,
+                let identity = infoObj["identity"] as? String
+            else { return nil }
+            return .updateProcessInfo(UpdateProcessInfo(
+                opID: opID,
+                sessionID: sessionID,
+                info: ProcessSession.ProcessInfo(
+                    platform: platform, arch: arch, pointerSize: pointerSize, identity: identity
+                )
+            ))
+
         case "update-arming":
             guard let stateObj = obj["arming_state"] as? [String: Any],
                 let armingState = decodeArmingState(stateObj)
@@ -506,6 +582,16 @@ public enum SessionOp: Sendable {
                 opID: opID,
                 sessionID: sessionID,
                 armingState: armingState
+            ))
+
+        case "update-module-analysis":
+            guard let analysisObj = obj["analysis"] as? [String: Any],
+                let analysis = ModuleAnalysis.fromWireJSON(analysisObj)
+            else { return nil }
+            return .updateModuleAnalysis(UpdateModuleAnalysis(
+                opID: opID,
+                sessionID: sessionID,
+                analysis: analysis
             ))
 
         case "update-modules":
@@ -619,6 +705,16 @@ public enum SessionOp: Sendable {
                 let insight = AddressInsight.fromWireJSON(insightObj)
             else { return nil }
             return .addInsight(AddInsight(
+                opID: opID,
+                sessionID: sessionID,
+                insight: insight
+            ))
+
+        case "update-insight":
+            guard let insightObj = obj["insight"] as? [String: Any],
+                let insight = AddressInsight.fromWireJSON(insightObj)
+            else { return nil }
+            return .updateInsight(UpdateInsight(
                 opID: opID,
                 sessionID: sessionID,
                 insight: insight

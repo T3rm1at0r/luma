@@ -5,49 +5,35 @@ public struct ModuleAnalysis: Codable, Sendable, FetchableRecord, PersistableRec
     public static let databaseTableName = "module_analysis"
 
     public var sessionID: UUID
-    public var moduleName: String
+    public var modulePath: String
     public var moduleUUID: String?
-    public var executableRanges: [Range]
+    public var mappedRanges: [ProcessNode.ModuleRange]
     public var functions: [Function]
-    public var aapDone: Bool
     public var analyzedAt: Date
 
     public enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
-        case moduleName = "module_name"
+        case modulePath = "module_path"
         case moduleUUID = "module_uuid"
-        case executableRanges = "executable_ranges"
+        case mappedRanges = "mapped_ranges"
         case functions
-        case aapDone = "aap_done"
         case analyzedAt = "analyzed_at"
     }
 
     public init(
         sessionID: UUID,
-        moduleName: String,
+        modulePath: String,
         moduleUUID: String? = nil,
-        executableRanges: [Range],
+        mappedRanges: [ProcessNode.ModuleRange],
         functions: [Function],
-        aapDone: Bool,
         analyzedAt: Date = Date()
     ) {
         self.sessionID = sessionID
-        self.moduleName = moduleName
+        self.modulePath = modulePath
         self.moduleUUID = moduleUUID
-        self.executableRanges = executableRanges
+        self.mappedRanges = mappedRanges
         self.functions = functions
-        self.aapDone = aapDone
         self.analyzedAt = analyzedAt
-    }
-
-    public struct Range: Codable, Sendable, Hashable {
-        public var offset: UInt64
-        public var size: UInt64
-
-        public init(offset: UInt64, size: UInt64) {
-            self.offset = offset
-            self.size = size
-        }
     }
 
     public struct Function: Codable, Sendable, Hashable {
@@ -71,28 +57,49 @@ public struct ModuleAnalysis: Codable, Sendable, FetchableRecord, PersistableRec
 }
 
 extension ModuleAnalysis {
+    private static let wireEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
+
+    private static let wireDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
+    public func toWireJSON() -> [String: Any]? {
+        guard let data = try? Self.wireEncoder.encode(self),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj
+    }
+
+    public static func fromWireJSON(_ obj: [String: Any]) -> ModuleAnalysis? {
+        guard let data = try? JSONSerialization.data(withJSONObject: obj),
+            let analysis = try? wireDecoder.decode(ModuleAnalysis.self, from: data)
+        else { return nil }
+        return analysis
+    }
+
     public func encode(to container: inout PersistenceContainer) {
-        container["session_id"] = sessionID.uuidString
-        container["module_name"] = moduleName
+        container["session_id"] = sessionID
+        container["module_path"] = modulePath
         container["module_uuid"] = moduleUUID
-        container["executable_ranges"] = try? JSONEncoder().encode(executableRanges)
+        container["mapped_ranges"] = try? JSONEncoder().encode(mappedRanges)
         container["functions"] = try? JSONEncoder().encode(functions)
-        container["aap_done"] = aapDone
         container["analyzed_at"] = analyzedAt
     }
 
     public init(row: Row) throws {
-        guard let sidStr: String = row["session_id"], let sid = UUID(uuidString: sidStr) else {
-            throw LumaCoreError.invalidArgument("module_analysis: missing session_id")
-        }
-        sessionID = sid
-        moduleName = row["module_name"]
+        sessionID = row["session_id"]
+        modulePath = row["module_path"]
         moduleUUID = row["module_uuid"]
-        let rangesData: Data = row["executable_ranges"]
+        let rangesData: Data = row["mapped_ranges"]
         let functionsData: Data = row["functions"]
-        executableRanges = (try? JSONDecoder().decode([Range].self, from: rangesData)) ?? []
+        mappedRanges = (try? JSONDecoder().decode([ProcessNode.ModuleRange].self, from: rangesData)) ?? []
         functions = (try? JSONDecoder().decode([Function].self, from: functionsData)) ?? []
-        aapDone = row["aap_done"]
         analyzedAt = row["analyzed_at"]
     }
 }

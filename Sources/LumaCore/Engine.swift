@@ -817,8 +817,20 @@ public final class Engine {
             self?.applyRemoteSessionInsightAdded(sessionID: sessionID, insight: insight)
         }
 
+        collaboration.onSessionInsightUpdated = { [weak self] sessionID, insight in
+            self?.applyRemoteSessionInsightUpdated(sessionID: sessionID, insight: insight)
+        }
+
         collaboration.onSessionInsightRemoved = { [weak self] sessionID, insightID in
             self?.applyRemoteSessionInsightRemoved(sessionID: sessionID, insightID: insightID)
+        }
+
+        collaboration.onSessionProcessInfoUpdated = { [weak self] sessionID, info in
+            self?.applyRemoteSessionProcessInfo(sessionID: sessionID, info: info)
+        }
+
+        collaboration.onSessionModuleAnalysisUpdated = { [weak self] sessionID, analysis in
+            self?.applyRemoteSessionModuleAnalysis(sessionID: sessionID, analysis: analysis)
         }
 
         collaboration.onSessionTraceUpserted = { [weak self] sessionID, trace in
@@ -907,9 +919,27 @@ public final class Engine {
         onSessionListChanged?(.insightAdded(stored))
     }
 
+    private func applyRemoteSessionInsightUpdated(sessionID: UUID, insight: AddressInsight) {
+        var stored = insight
+        stored.sessionID = sessionID
+        try? store.save(stored)
+        onSessionListChanged?(.insightUpdated(stored))
+    }
+
     private func applyRemoteSessionInsightRemoved(sessionID: UUID, insightID: UUID) {
         try? store.deleteInsight(id: insightID)
         onSessionListChanged?(.insightRemoved(id: insightID, sessionID: sessionID))
+    }
+
+    private func applyRemoteSessionProcessInfo(sessionID: UUID, info: ProcessSession.ProcessInfo) {
+        try? store.deleteMemoryPagesAnon(sessionID: sessionID, exceptIdentity: info.identity)
+        updateSession(id: sessionID) { $0.processInfo = info }
+    }
+
+    private func applyRemoteSessionModuleAnalysis(sessionID: UUID, analysis: ModuleAnalysis) {
+        var stored = analysis
+        stored.sessionID = sessionID
+        try? store.save(stored)
     }
 
     private func applyRemoteSessionInstrumentAdded(sessionID: UUID, instance: InstrumentInstance) {
@@ -1124,7 +1154,16 @@ public final class Engine {
             if !session.threads.isEmpty {
                 record.lastKnownThreads = session.threads
             }
+            if let info = session.processInfo {
+                record.processInfo = info
+                try? store.deleteMemoryPagesAnon(sessionID: session.id, exceptIdentity: info.identity)
+            }
             saveSession(record)
+            for analysis in session.moduleAnalyses {
+                var stored = analysis
+                stored.sessionID = session.id
+                try? store.save(stored)
+            }
         } else {
             var record = ProcessSession(
                 id: session.id,
@@ -1775,14 +1814,18 @@ public final class Engine {
 
             if let info = await node.fetchProcessInfo() {
                 let mainModule = node.mainModule
+                try? store.deleteMemoryPagesAnon(sessionID: s.id, exceptIdentity: info.identity)
+                let storedInfo = ProcessSession.ProcessInfo(
+                    platform: info.platform,
+                    arch: info.arch,
+                    pointerSize: info.pointerSize,
+                    identity: info.identity
+                )
                 updateSession(id: s.id) {
-                    $0.processInfo = ProcessSession.ProcessInfo(
-                        platform: info.platform,
-                        arch: info.arch,
-                        pointerSize: info.pointerSize
-                    )
+                    $0.processInfo = storedInfo
                     $0.lastKnownMainModule = mainModule
                 }
+                collaboration.enqueueUpdateProcessInfo(sessionID: s.id, info: storedInfo)
             }
 
             await node.setupITraceDraining()
@@ -2103,7 +2146,7 @@ public final class Engine {
         if let existing = disassemblers[sessionID] { return existing }
         guard let info = session(id: sessionID)?.processInfo else { return nil }
         let env = SessionDisassemblyEnvironment(engine: self, sessionID: sessionID)
-        let reader = memoryReader(forSessionID: sessionID, live: env)
+        let reader = memoryReader(forSessionID: sessionID, env: env)
         let d = Disassembler(
             sessionID: sessionID,
             processInfo: info,
@@ -2112,28 +2155,78 @@ public final class Engine {
             introspector: env,
             reader: reader
         )
+        d.onAnalysisSaved = { [weak self] analysis in
+            self?.collaboration.enqueueUpdateModuleAnalysis(sessionID: sessionID, analysis: analysis)
+        }
         disassemblers[sessionID] = d
         return d
     }
 
     public func memoryReader(forSessionID sessionID: UUID) -> MemoryReader {
         let env = SessionDisassemblyEnvironment(engine: self, sessionID: sessionID)
-        return memoryReader(forSessionID: sessionID, live: env)
+        return memoryReader(forSessionID: sessionID, env: env)
     }
 
-    private func memoryReader(forSessionID sessionID: UUID, live: MemoryReader) -> CachingMemoryReader {
+    private func memoryReader(forSessionID sessionID: UUID, env: SessionDisassemblyEnvironment) -> CachingMemoryReader {
         if let existing = memoryReaders[sessionID] {
-            existing.live = live
+            existing.live = env
             return existing
         }
-        let reader = CachingMemoryReader(sessionID: sessionID, store: store, live: live)
+        let reader = CachingMemoryReader(sessionID: sessionID, store: store, keying: env, live: env)
+        reader.publish = { [weak self] page in
+            self?.collaboration.publishMemoryPage(sessionID: sessionID, page)
+        }
+        reader.fetchRemote = { [weak self] region in
+            await self?.collaboration.fetchMemoryPage(sessionID: sessionID, region: region)
+        }
         memoryReaders[sessionID] = reader
         return reader
     }
 
-    func modulesSnapshot(forSessionID sessionID: UUID) -> [ProcessModule] {
+    public func recordInsightResolution(_ insight: AddressInsight, resolved: UInt64) {
+        var updated = insight
+        updated.lastResolvedAddress = resolved
+        try? store.save(updated)
+        collaboration.enqueueUpdateInsight(sessionID: updated.sessionID, insight: updated)
+    }
+
+    public func invalidateInsightRange(sessionID: UUID, address: UInt64, byteCount: Int) async {
+        let env = SessionDisassemblyEnvironment(engine: self, sessionID: sessionID)
+        let end = address &+ UInt64(byteCount)
+        var cursor = MemoryPage.base(of: address)
+        while cursor < end {
+            switch await env.attribution(pageBase: cursor) {
+            case .module(let module):
+                if let uuid = await env.moduleUUID(forPath: module.path) {
+                    try? store.deleteMemoryPage(sessionID: sessionID, moduleUUID: uuid, offset: cursor &- module.base)
+                }
+            case .anonymous:
+                if let identity = env.processIdentity {
+                    try? store.deleteMemoryPage(sessionID: sessionID, processIdentity: identity, address: cursor)
+                }
+            case .ephemeral:
+                break
+            }
+            cursor = cursor &+ MemoryPage.size
+        }
+    }
+
+    public func invalidateModule(sessionID: UUID, modulePath: String) {
+        guard let analysis = try? store.fetchModuleAnalysis(sessionID: sessionID, modulePath: modulePath) else { return }
+        if let uuid = analysis.moduleUUID {
+            try? store.deleteMemoryPagesModule(sessionID: sessionID, moduleUUID: uuid)
+        }
+        try? store.deleteModuleAnalysis(sessionID: sessionID, modulePath: modulePath)
+        disassemblers[sessionID]?.forgetModule(path: modulePath)
+    }
+
+    public func modulesSnapshot(forSessionID sessionID: UUID) -> [ProcessModule] {
         if let node = node(forSessionID: sessionID) { return node.modules }
         return session(id: sessionID)?.lastKnownModules ?? []
+    }
+
+    public func enclosingModule(at address: UInt64, sessionID: UUID) -> ProcessModule? {
+        modulesSnapshot(forSessionID: sessionID).first { address >= $0.base && address < ($0.base &+ $0.size) }
     }
 
     public func resolve(sessionID: UUID, anchor: AddressAnchor, hint: UInt64? = nil) async -> UInt64? {
@@ -4806,9 +4899,17 @@ public struct TracerHookCompileFailures: Swift.Error {
 }
 
 @MainActor
-final class SessionDisassemblyEnvironment: ModuleIntrospector, MemoryReader {
+final class SessionDisassemblyEnvironment: ModuleIntrospector, MemoryReader, PageKeying {
     private unowned let engine: Engine
     private let sessionID: UUID
+    private var uuidCache: [String: String] = [:]
+    private var pageAttribution: [UInt64: CachedAttribution] = [:]
+
+    private enum CachedAttribution {
+        case module(String)
+        case anonymous
+        case ephemeral
+    }
 
     init(engine: Engine, sessionID: UUID) {
         self.engine = engine
@@ -4839,6 +4940,89 @@ final class SessionDisassemblyEnvironment: ModuleIntrospector, MemoryReader {
             throw DisassemblyError.detached
         }
         return try await node.readRemoteMemory(at: address, count: count)
+    }
+
+    func attribution(pageBase: UInt64) async -> PageAttribution {
+        let modules = engine.modulesSnapshot(forSessionID: sessionID)
+        if let direct = modules.first(where: { pageBase >= $0.base && pageBase < ($0.base &+ $0.size) }) {
+            return .module(direct)
+        }
+        if let cached = pageAttribution[pageBase] {
+            return decode(cached, modules: modules)
+        }
+        if let mapped = moduleByMappedRanges(pageBase: pageBase, modules: modules) {
+            pageAttribution[pageBase] = .module(mapped.path)
+            return .module(mapped)
+        }
+        guard let node = engine.node(forSessionID: sessionID) else {
+            return .ephemeral
+        }
+        guard let range = try? await node.findRangeByAddress(pageBase) else {
+            pageAttribution[pageBase] = .ephemeral
+            return .ephemeral
+        }
+        if let filePath = range.filePath, let owner = modules.first(where: { $0.path == filePath }) {
+            await ensureModuleIdentified(owner)
+            pageAttribution[pageBase] = .module(owner.path)
+            return .module(owner)
+        }
+        pageAttribution[pageBase] = .anonymous
+        return .anonymous
+    }
+
+    private func decode(_ cached: CachedAttribution, modules: [ProcessModule]) -> PageAttribution {
+        switch cached {
+        case .module(let path):
+            if let m = modules.first(where: { $0.path == path }) { return .module(m) }
+            return .ephemeral
+        case .anonymous: return .anonymous
+        case .ephemeral: return .ephemeral
+        }
+    }
+
+    private func moduleByMappedRanges(pageBase: UInt64, modules: [ProcessModule]) -> ProcessModule? {
+        for module in modules {
+            guard let analysis = try? engine.store.fetchModuleAnalysis(sessionID: sessionID, modulePath: module.path) else { continue }
+            for range in analysis.mappedRanges {
+                let rlo = module.base &+ range.offset
+                if pageBase >= rlo && pageBase < (rlo &+ range.size) {
+                    return module
+                }
+            }
+        }
+        return nil
+    }
+
+    private func ensureModuleIdentified(_ module: ProcessModule) async {
+        if (try? engine.store.fetchModuleAnalysis(sessionID: sessionID, modulePath: module.path)) != nil { return }
+        guard let node = engine.node(forSessionID: sessionID) else { return }
+        let identity = try? await node.getModuleIdentity(name: module.path)
+        let ranges = (try? await node.enumerateModuleRanges(name: module.path)) ?? []
+        let stub = ModuleAnalysis(
+            sessionID: sessionID,
+            modulePath: module.path,
+            moduleUUID: identity,
+            mappedRanges: ranges,
+            functions: []
+        )
+        try? engine.store.save(stub)
+    }
+
+    func moduleUUID(forPath path: String) async -> String? {
+        if let cached = uuidCache[path] { return cached }
+        if let stored = (try? engine.store.fetchModuleAnalysis(sessionID: sessionID, modulePath: path))?.moduleUUID {
+            uuidCache[path] = stored
+            return stored
+        }
+        guard let node = engine.node(forSessionID: sessionID),
+            let uuid = try? await node.getModuleIdentity(name: path)
+        else { return nil }
+        uuidCache[path] = uuid
+        return uuid
+    }
+
+    var processIdentity: String? {
+        engine.session(id: sessionID)?.processInfo?.identity
     }
 }
 

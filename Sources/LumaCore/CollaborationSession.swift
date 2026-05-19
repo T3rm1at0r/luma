@@ -84,6 +84,8 @@ public final class CollaborationSession {
         public var instruments: [InstrumentInstance]
         public var insights: [AddressInsight]
         public var traces: [ITrace]
+        public var processInfo: ProcessSession.ProcessInfo?
+        public var moduleAnalyses: [ModuleAnalysis]
 
         public init(
             id: UUID,
@@ -102,7 +104,9 @@ public final class CollaborationSession {
             replCells: [REPLCell] = [],
             instruments: [InstrumentInstance] = [],
             insights: [AddressInsight] = [],
-            traces: [ITrace] = []
+            traces: [ITrace] = [],
+            processInfo: ProcessSession.ProcessInfo? = nil,
+            moduleAnalyses: [ModuleAnalysis] = []
         ) {
             self.id = id
             self.host = host
@@ -121,6 +125,8 @@ public final class CollaborationSession {
             self.instruments = instruments
             self.insights = insights
             self.traces = traces
+            self.processInfo = processInfo
+            self.moduleAnalyses = moduleAnalyses
         }
 
         public static func fromJSON(_ obj: [String: Any]) -> Session? {
@@ -171,6 +177,23 @@ public final class CollaborationSession {
             let traceObjs = (obj["traces"] as? [[String: Any]]) ?? []
             let traces = traceObjs.compactMap(ITrace.fromWireJSON)
 
+            let processInfo: ProcessSession.ProcessInfo?
+            if let infoObj = obj["process_info"] as? [String: Any],
+                let platform = infoObj["platform"] as? String,
+                let arch = infoObj["arch"] as? String,
+                let pointerSize = infoObj["pointer_size"] as? Int,
+                let identity = infoObj["identity"] as? String
+            {
+                processInfo = ProcessSession.ProcessInfo(
+                    platform: platform, arch: arch, pointerSize: pointerSize, identity: identity
+                )
+            } else {
+                processInfo = nil
+            }
+
+            let analysisObjs = (obj["module_analyses"] as? [[String: Any]]) ?? []
+            let moduleAnalyses = analysisObjs.compactMap(ModuleAnalysis.fromWireJSON)
+
             let armingState: ProcessSession.ArmingState
             if let stateObj = obj["arming_state"] as? [String: Any],
                 let parsed = decodeArmingState(stateObj) {
@@ -196,7 +219,9 @@ public final class CollaborationSession {
                 replCells: cells,
                 instruments: instruments,
                 insights: insights,
-                traces: traces
+                traces: traces,
+                processInfo: processInfo,
+                moduleAnalyses: moduleAnalyses
             )
         }
     }
@@ -307,7 +332,10 @@ public final class CollaborationSession {
     public var onSessionInstrumentAddRequested: ((UUID, InstrumentKind, String, Data) -> Void)?
     public var onSessionInstrumentUpdateConfigRequested: ((UUID, UUID, Data) -> Void)?
     public var onSessionInsightAdded: ((UUID, AddressInsight) -> Void)?
+    public var onSessionInsightUpdated: ((UUID, AddressInsight) -> Void)?
     public var onSessionInsightRemoved: ((UUID, UUID) -> Void)?
+    public var onSessionProcessInfoUpdated: ((UUID, ProcessSession.ProcessInfo) -> Void)?
+    public var onSessionModuleAnalysisUpdated: ((UUID, ModuleAnalysis) -> Void)?
     public var onSessionTraceUpserted: ((UUID, ITrace) -> Void)?
     public var onSessionTraceRemoved: ((UUID, UUID) -> Void)?
     public var onSessionTraceDataProgressed: ((UUID, UUID, Int) -> Void)?
@@ -982,8 +1010,79 @@ public final class CollaborationSession {
         enqueueSessionOp(.addInsight(.init(sessionID: sessionID, insight: wireInsight)))
     }
 
+    public func enqueueUpdateInsight(sessionID: UUID, insight: AddressInsight) {
+        var wireInsight = insight
+        wireInsight.sessionID = sessionID
+        enqueueSessionOp(.updateInsight(.init(sessionID: sessionID, insight: wireInsight)))
+    }
+
     public func enqueueRemoveInsight(sessionID: UUID, insightID: UUID) {
         enqueueSessionOp(.removeInsight(.init(sessionID: sessionID, insightID: insightID)))
+    }
+
+    public func enqueueUpdateProcessInfo(sessionID: UUID, info: ProcessSession.ProcessInfo) {
+        enqueueSessionOp(.updateProcessInfo(.init(sessionID: sessionID, info: info)))
+    }
+
+    public func enqueueUpdateModuleAnalysis(sessionID: UUID, analysis: ModuleAnalysis) {
+        var wire = analysis
+        wire.sessionID = sessionID
+        enqueueSessionOp(.updateModuleAnalysis(.init(sessionID: sessionID, analysis: wire)))
+    }
+
+    public func publishMemoryPage(sessionID: UUID, _ page: MemoryPagePublish) {
+        guard case .joined(let labID) = status else { return }
+        var payload: JSONObject = [
+            "op_id": UUID().uuidString,
+            "kind": "publish-memory-page",
+        ]
+        switch page.region {
+        case .module(let uuid, let offset):
+            payload["region"] = "module"
+            payload["module_uuid"] = uuid
+            payload["offset"] = Int64(bitPattern: offset)
+        case .anonymous(let identity, let address):
+            payload["region"] = "anonymous"
+            payload["process_identity"] = identity
+            payload["address"] = Int64(bitPattern: address)
+        }
+        sendNotification(
+            to: "/labs/\(labID)/sessions/\(sessionID.uuidString)",
+            type: "+op",
+            payload: payload,
+            data: [UInt8](page.bytes)
+        )
+    }
+
+    public func fetchMemoryPage(sessionID: UUID, region: MemoryPageRegion) async -> Data? {
+        guard case .joined(let labID) = status else { return nil }
+        var payload: JSONObject = [:]
+        switch region {
+        case .module(let uuid, let offset):
+            payload["region"] = "module"
+            payload["module_uuid"] = uuid
+            payload["offset"] = Int64(bitPattern: offset)
+        case .anonymous(let identity, let address):
+            payload["region"] = "anonymous"
+            payload["process_identity"] = identity
+            payload["address"] = Int64(bitPattern: address)
+        }
+        return await withCheckedContinuation { continuation in
+            sendRequest(
+                to: "/labs/\(labID)/sessions/\(sessionID.uuidString)",
+                type: "+fetch-memory-page",
+                payload: payload
+            ) { [weak self] result in
+                switch result {
+                case .success(let reply):
+                    let present = (reply["present"] as? Bool) ?? false
+                    let bytes = self?.lastMessageData ?? []
+                    continuation.resume(returning: present ? Data(bytes) : nil)
+                case .failure:
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
     }
 
     public func uploadTraceData(sessionID: UUID, traceID: UUID, offset: Int, chunk: Data) {
@@ -1202,11 +1301,17 @@ public final class CollaborationSession {
         case .updatePhase(let u):
             onSessionPhaseChanged?(u.sessionID, u.phase, u.reason)
 
+        case .updateProcessInfo(let u):
+            onSessionProcessInfoUpdated?(u.sessionID, u.info)
+
         case .updateArming(let u):
             onSessionArmingChanged?(u.sessionID, u.armingState)
 
         case .updateModules(let u):
             onSessionModulesUpdated?(u.sessionID, u.delta)
+
+        case .updateModuleAnalysis(let u):
+            onSessionModuleAnalysisUpdated?(u.sessionID, u.analysis)
 
         case .updateThreads(let u):
             onSessionThreadsUpdated?(u.sessionID, u.delta)
@@ -1234,6 +1339,9 @@ public final class CollaborationSession {
 
         case .addInsight(let a):
             onSessionInsightAdded?(a.sessionID, a.insight)
+
+        case .updateInsight(let u):
+            onSessionInsightUpdated?(u.sessionID, u.insight)
 
         case .removeInsight(let r):
             onSessionInsightRemoved?(r.sessionID, r.insightID)

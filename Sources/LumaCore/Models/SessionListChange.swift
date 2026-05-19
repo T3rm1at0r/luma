@@ -8,6 +8,7 @@ public enum SessionListChange: Sendable {
     case instrumentUpdated(InstrumentInstance)
     case instrumentRemoved(id: UUID, sessionID: UUID)
     case insightAdded(AddressInsight)
+    case insightUpdated(AddressInsight)
     case insightRemoved(id: UUID, sessionID: UUID)
     case traceUpdated(ITrace)
     case traceRemoved(id: UUID, sessionID: UUID)

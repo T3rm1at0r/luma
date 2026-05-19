@@ -109,13 +109,12 @@ private struct PhoneContentView: View {
 
                     case .insight(let sessionID, let insightID):
                         if let session = engine.sessions.first(where: { $0.id == sessionID }),
-                           let insight = engine.insightsBySession[sessionID]?
-                               .first(where: { $0.id == insightID })
+                           (engine.insightsBySession[sessionID] ?? []).contains(where: { $0.id == insightID })
                         {
                             SessionContent(sessionID: sessionID, engine: engine) {
                                 AddressInsightDetailView(
                                     session: session,
-                                    insight: insight,
+                                    insightID: insightID,
                                     engine: engine,
                                     selection: $path.asSidebarSelection()
                                 )

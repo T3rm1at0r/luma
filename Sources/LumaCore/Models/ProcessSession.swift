@@ -100,11 +100,13 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
         public let platform: String
         public let arch: String
         public let pointerSize: Int
+        public let identity: String
 
-        public init(platform: String, arch: String, pointerSize: Int) {
+        public init(platform: String, arch: String, pointerSize: Int, identity: String) {
             self.platform = platform
             self.arch = arch
             self.pointerSize = pointerSize
+            self.identity = identity
         }
     }
 

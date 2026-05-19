@@ -2291,6 +2291,11 @@ final class MainWindow: InstrumentUIHost {
         case .insightAdded(let insight):
             insightsBySession[insight.sessionID, default: []].append(insight)
             insertChildRow(makeInsightRow(insight), kind: .insight(sessionID: insight.sessionID, insightID: insight.id), sessionID: insight.sessionID)
+        case .insightUpdated(let insight):
+            if let idx = insightsBySession[insight.sessionID]?.firstIndex(where: { $0.id == insight.id }) {
+                insightsBySession[insight.sessionID]?[idx] = insight
+            }
+            currentInsightDetail?.handleInsightUpdated(insight)
         case .insightRemoved(let id, let sessionID):
             insightsBySession[sessionID]?.removeAll { $0.id == id }
             removeChildRow(kind: .insight(sessionID: sessionID, insightID: id))

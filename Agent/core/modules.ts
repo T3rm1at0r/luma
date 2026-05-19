@@ -31,14 +31,34 @@ export interface SymbolEntry {
 export interface ModuleRangeEntry {
     offset: string;
     size: number;
+    protection: string;
+}
+
+export interface ProcessRangeEntry {
+    base: string;
+    size: number;
+    protection: string;
+    filePath: string | null;
 }
 
 export function enumerateModuleRanges(name: string): ModuleRangeEntry[] {
     const module = Process.getModuleByName(name);
-    return module.enumerateRanges('r-x').map(r => ({
+    return module.enumerateRanges('---').map(r => ({
         offset: '0x' + r.base.sub(module.base).toString(16),
         size: r.size,
+        protection: r.protection,
     }));
+}
+
+export function findRangeByAddress(address: string): ProcessRangeEntry | null {
+    const r = Process.findRangeByAddress(ptr(address));
+    if (r === null) return null;
+    return {
+        base: r.base.toString(),
+        size: r.size,
+        protection: r.protection,
+        filePath: r.file ? r.file.path : null,
+    };
 }
 
 export function getModuleIdentity(name: string): string | null {

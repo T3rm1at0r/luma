@@ -995,9 +995,10 @@ public final class ProcessNode: Identifiable {
         return arr.compactMap { entry in
             guard let offsetStr = entry["offset"] as? String,
                 let offset = UInt64(offsetStr.dropFirst(2), radix: 16),
-                let size = entry["size"] as? Int
+                let size = entry["size"] as? Int,
+                let protection = entry["protection"] as? String
             else { return nil }
-            return ModuleRange(offset: offset, size: UInt64(size))
+            return ModuleRange(offset: offset, size: UInt64(size), protection: protection)
         }
     }
 
@@ -1006,9 +1007,29 @@ public final class ProcessNode: Identifiable {
         return raw as? String
     }
 
-    public struct ModuleRange: Sendable, Hashable {
+    public func findRangeByAddress(_ address: UInt64) async throws -> ProcessRange? {
+        let raw = try await script.exports.findRangeByAddress("0x" + String(address, radix: 16))
+        guard let entry = raw as? [String: Any] else { return nil }
+        guard let baseStr = entry["base"] as? String,
+            let size = entry["size"] as? Int,
+            let protection = entry["protection"] as? String
+        else { return nil }
+        let trimmed = baseStr.hasPrefix("0x") ? String(baseStr.dropFirst(2)) : baseStr
+        guard let base = UInt64(trimmed, radix: 16) else { return nil }
+        return ProcessRange(base: base, size: UInt64(size), protection: protection, filePath: entry["filePath"] as? String)
+    }
+
+    public struct ModuleRange: Sendable, Hashable, Codable {
         public let offset: UInt64
         public let size: UInt64
+        public let protection: String
+    }
+
+    public struct ProcessRange: Sendable, Hashable {
+        public let base: UInt64
+        public let size: UInt64
+        public let protection: String
+        public let filePath: String?
     }
 
     public func resolveTargets(scope: String, query: String) async throws -> [[String: Any]] {
@@ -1045,6 +1066,7 @@ public final class ProcessNode: Identifiable {
         public let arch: String
         public let pointerSize: Int
         public let mainModule: MainModule
+        public let identity: String
 
         public struct MainModule: Codable, Sendable {
             public let name: String

@@ -14,6 +14,15 @@ import Pango
 final class InsightDetailView {
     static var copyFeedback: ((String) -> Void)?
 
+    func handleInsightUpdated(_ updated: LumaCore.AddressInsight) {
+        guard updated.id == insight.id else { return }
+        let prevResolved = insight.lastResolvedAddress
+        insight = updated
+        if updated.lastResolvedAddress != prevResolved {
+            scheduleRefresh()
+        }
+    }
+
     let widget: Box
 
     private weak var engine: Engine?
@@ -56,6 +65,10 @@ final class InsightDetailView {
     private var valueChangedHandler: gulong = 0
     private var lastNodeAvailable: Bool = false
 
+    private let refreshBar: Box
+    private let rereadButton: Button
+    private let reanalyzeButton: Button
+
     private static let initialChunk = 64
     private static let moreChunk = 64
     private static let rowLeftGutter: Double = 54
@@ -77,6 +90,21 @@ final class InsightDetailView {
         bannerSlot = Box(orientation: .vertical, spacing: 0)
         bannerSlot.hexpand = true
         widget.append(child: bannerSlot)
+
+        refreshBar = Box(orientation: .horizontal, spacing: 6)
+        refreshBar.halign = .end
+        refreshBar.marginTop = 4
+        refreshBar.marginEnd = 8
+        refreshBar.marginStart = 8
+        rereadButton = Button(iconName: "view-refresh-symbolic")
+        rereadButton.tooltipText = "Drop cached bytes for this view and refetch."
+        rereadButton.hasFrame = false
+        reanalyzeButton = Button(iconName: "emblem-synchronizing-symbolic")
+        reanalyzeButton.tooltipText = "Drop disassembly analysis for this address's module."
+        reanalyzeButton.hasFrame = false
+        refreshBar.append(child: rereadButton)
+        refreshBar.append(child: reanalyzeButton)
+        widget.append(child: refreshBar)
 
         contentOverlay = Overlay()
         contentOverlay.hexpand = true
@@ -158,6 +186,9 @@ final class InsightDetailView {
         themeSignalID = ThemeWatcher.subscribe(owner: self) { view in
             view.handleThemeChanged()
         }
+
+        rereadButton.onClicked { [weak self] _ in MainActor.assumeIsolated { self?.rereadBytes() } }
+        reanalyzeButton.onClicked { [weak self] _ in MainActor.assumeIsolated { self?.reanalyzeModule() } }
 
         applySessionState()
         scheduleRefresh()
@@ -257,6 +288,38 @@ final class InsightDetailView {
             scheduleRefresh()
         }
         lastNodeAvailable = nodeAvailable
+
+        rereadButton.sensitive = nodeAvailable
+        reanalyzeButton.sensitive = nodeAvailable && enclosingModule() != nil
+    }
+
+    private func enclosingModule() -> LumaCore.ProcessModule? {
+        guard let engine else { return nil }
+        if let resolved = insight.lastResolvedAddress,
+            let module = engine.enclosingModule(at: resolved, sessionID: sessionID)
+        {
+            return module
+        }
+        if case .moduleOffset(let name, _) = insight.anchor {
+            return engine.modulesSnapshot(forSessionID: sessionID).first { $0.name == name }
+        }
+        return nil
+    }
+
+    private func rereadBytes() {
+        guard let engine, let resolved = insight.lastResolvedAddress else { return }
+        let byteCount = insight.byteCount
+        let sid = sessionID
+        Task { @MainActor in
+            await engine.invalidateInsightRange(sessionID: sid, address: resolved, byteCount: byteCount)
+            scheduleRefresh()
+        }
+    }
+
+    private func reanalyzeModule() {
+        guard let engine, let module = enclosingModule() else { return }
+        engine.invalidateModule(sessionID: sessionID, modulePath: module.path)
+        scheduleRefresh()
     }
 
     func requestFocus() {
@@ -355,8 +418,7 @@ final class InsightDetailView {
             }
             if Task.isCancelled { return }
 
-            insight.lastResolvedAddress = resolved
-            try? engine.store.save(insight)
+            engine.recordInsightResolution(insight, resolved: resolved)
 
             switch kind {
             case .memory:
@@ -372,6 +434,13 @@ final class InsightDetailView {
             case .disassembly:
                 guard let disassembler = engine.disassembler(forSessionID: sessionID) else {
                     showErrorLabel("Disassembler unavailable.")
+                    return
+                }
+                do {
+                    _ = try await reader.read(at: resolved, count: 1)
+                } catch {
+                    if Task.isCancelled { return }
+                    showErrorLabel(error.localizedDescription)
                     return
                 }
                 let page = await disassembler.disassemblePage(
