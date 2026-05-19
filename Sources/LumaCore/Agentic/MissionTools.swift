@@ -1007,7 +1007,7 @@ public enum MissionTools {
     private static func registerDisassemble(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "disassemble",
-            description: "Disassemble instructions starting at the given address. Returns plain-text assembly with addresses and bytes. Use after resolve_symbol to look at a function's body.",
+            description: "Disassemble instructions starting at the given address. Returns plain-text assembly with addresses and bytes. Use after resolve_symbol to look at a function's body. The 'scope' field is 'function' when the address is a known function start (output covers the whole function, may be shorter than count) or 'span' otherwise (output is exactly count instructions from the address).",
             inputSchemaJSON: """
                 {"type":"object","properties":{"session_id":{"type":"string"},"address":{"type":"string","description":"Hex address, e.g. 0x1004500"},"count":{"type":"integer","minimum":1,"maximum":256,"default":32}},"required":["session_id","address"],"additionalProperties":false}
                 """,
@@ -1027,15 +1027,25 @@ public enum MissionTools {
             guard let dis = engine.disassembler(forSessionID: sessionID) else {
                 return errorResult("no disassembler for session", code: .notFound)
             }
-            let lines = await dis.disassemble(DisassemblyRequest(address: address, count: count, isDarkMode: false))
-            let text = lines.map { line in
+            let page = await dis.disassemblePage(DisassemblyRequest(address: address, count: count, isDarkMode: false))
+            let text = page.lines.map { line in
                 let addr = String(format: "0x%llx", line.address)
                 let asm = line.asmText.plainText
                 let comment = line.commentText?.plainText ?? ""
                 return "\(addr)  \(asm)\(comment.isEmpty ? "" : "  \(comment)")"
             }.joined(separator: "\n")
-            let payload: [String: Any] = ["address": addrString, "count": lines.count, "text": text]
-            return makeResult(jsonObject: payload, summary: "Disassembled \(lines.count) instruction\(lines.count == 1 ? "" : "s") at \(addrString)")
+            let scopeLabel: String
+            switch page.scope {
+            case .function: scopeLabel = "function"
+            case .span: scopeLabel = "span"
+            }
+            let payload: [String: Any] = [
+                "address": addrString,
+                "count": page.lines.count,
+                "scope": scopeLabel,
+                "text": text,
+            ]
+            return makeResult(jsonObject: payload, summary: "Disassembled \(page.lines.count) instruction\(page.lines.count == 1 ? "" : "s") at \(addrString)")
         }
     }
 

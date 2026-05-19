@@ -987,6 +987,30 @@ public final class ProcessNode: Identifiable {
         return ModuleSymbolBundle.fromJSON(dict)
     }
 
+    public func enumerateModuleRanges(name: String) async throws -> [ModuleRange] {
+        let raw = try await script.exports.enumerateModuleRanges(name)
+        guard let arr = raw as? [[String: Any]] else {
+            throw LumaCoreError.protocolViolation("enumerateModuleRanges: unexpected response shape")
+        }
+        return arr.compactMap { entry in
+            guard let offsetStr = entry["offset"] as? String,
+                let offset = UInt64(offsetStr.dropFirst(2), radix: 16),
+                let size = entry["size"] as? Int
+            else { return nil }
+            return ModuleRange(offset: offset, size: UInt64(size))
+        }
+    }
+
+    public func getModuleIdentity(name: String) async throws -> String? {
+        let raw = try await script.exports.getModuleIdentity(name)
+        return raw as? String
+    }
+
+    public struct ModuleRange: Sendable, Hashable {
+        public let offset: UInt64
+        public let size: UInt64
+    }
+
     public func resolveTargets(scope: String, query: String) async throws -> [[String: Any]] {
         let raw = try await script.exports.resolveTargets([
             "scope": scope,

@@ -13,32 +13,90 @@ public struct DisassemblyRequest: Sendable, Hashable {
     }
 }
 
+public enum DisassemblyScope: Sendable {
+    case span
+    case function
+}
+
+public struct DisassemblyPage: Sendable {
+    public let lines: [DisassemblyLine]
+    public let scope: DisassemblyScope
+
+    public init(lines: [DisassemblyLine], scope: DisassemblyScope) {
+        self.lines = lines
+        self.scope = scope
+    }
+}
+
 @MainActor
 public final class Disassembler {
     private let node: ProcessNode
+    private let sessionID: UUID
     private let processInfo: ProcessSession.ProcessInfo
+    private let store: ProjectStore
 
     private var r2: R2Core!
     private var openTask: Task<Void, Never>?
     private var currentDarkMode: Bool?
-    private var didRunPreludeScan = false
+    private var analyzedModules: Set<String> = []
 
-    public init(node: ProcessNode, processInfo: ProcessSession.ProcessInfo) {
+    public init(node: ProcessNode, sessionID: UUID, processInfo: ProcessSession.ProcessInfo, store: ProjectStore) {
         self.node = node
+        self.sessionID = sessionID
         self.processInfo = processInfo
+        self.store = store
     }
 
     public func disassemble(_ request: DisassemblyRequest) async -> [DisassemblyLine] {
+        await disassemblePage(request).lines
+    }
+
+    public func disassemblePage(_ request: DisassemblyRequest) async -> DisassemblyPage {
         await ensureOpened()
         if currentDarkMode != request.isDarkMode {
             await r2.applyTheme(request.isDarkMode ? "default" : "iaito")
             currentDarkMode = request.isDarkMode
         }
-        let out = await r2.cmd("pdJ \(request.count) @ 0x\(String(request.address, radix: 16))")
+        let hex = String(request.address, radix: 16)
+        if let module = node.modules.first(where: { request.address >= $0.base && request.address < ($0.base + $0.size) }) {
+            await ensureModuleAnalyzed(module: module)
+        }
+        if let bounded = await disassembleFunctionIfStart(at: request.address, hex: hex) {
+            return DisassemblyPage(lines: bounded, scope: .function)
+        }
+        let out = await r2.cmd("pdJ \(request.count) @ 0x\(hex)")
+        return DisassemblyPage(lines: decodeOps(out), scope: .span)
+    }
+
+    private func disassembleFunctionIfStart(at address: UInt64, hex: String) async -> [DisassemblyLine]? {
+        guard let begin = await fetchFunctionBegin(hex: hex), begin == address,
+            let end = await fetchFunctionEnd(hex: hex), end > begin
+        else { return nil }
+        let bytes = end &- begin
+        let out = await r2.cmd("pDJ \(bytes) @ 0x\(hex)")
         guard let ops = try? JSONDecoder().decode([R2DisasmOp].self, from: Data(out.utf8)) else {
+            return nil
+        }
+        let lines = ops
+            .filter { $0.isInstructionEntry }
+            .map { $0.toDisassemblyLine() }
+            .filter { $0.address < end }
+        return lines.isEmpty ? nil : lines
+    }
+
+private func fetchFunctionEnd(hex: String) async -> UInt64? {
+        let result = await r2.cmdWithLogs("?v $FE @ 0x\(hex)")
+        if result.hasErrors { return nil }
+        let raw = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = parseHex(raw), value != 0 else { return nil }
+        return value
+    }
+
+    private func decodeOps(_ raw: String) -> [DisassemblyLine] {
+        guard let ops = try? JSONDecoder().decode([R2DisasmOp].self, from: Data(raw.utf8)) else {
             return []
         }
-        return ops.map { $0.toDisassemblyLine() }
+        return ops.filter { $0.isInstructionEntry }.map { $0.toDisassemblyLine() }
     }
 
     public func runCommand(_ command: String) async -> R2CommandResult {
@@ -48,18 +106,99 @@ public final class Disassembler {
 
     public func findFunctionStart(containing address: UInt64) async -> UInt64? {
         await ensureOpened()
-        let hex = String(address, radix: 16)
-        if let direct = await fetchFunctionBegin(hex: hex) {
-            return direct
+        if let module = node.modules.first(where: { address >= $0.base && address < ($0.base + $0.size) }) {
+            await ensureModuleAnalyzed(module: module)
         }
-        if !didRunPreludeScan {
+        return await fetchFunctionBegin(hex: String(address, radix: 16))
+    }
+
+    private func ensureModuleAnalyzed(module: ProcessModule) async {
+        if analyzedModules.contains(module.name) { return }
+        analyzedModules.insert(module.name)
+
+        let identity = try? await node.getModuleIdentity(name: module.name)
+
+        if let existing = try? store.fetchModuleAnalysis(sessionID: sessionID, moduleName: module.name),
+            existing.moduleUUID == identity
+        {
+            await replayAnalysis(existing, module: module)
+            return
+        }
+
+        let ranges = (try? await node.enumerateModuleRanges(name: module.name)) ?? []
+        let bundle = try? await node.enumerateModuleSymbols(name: module.name)
+
+        let functions = await registerKnownFunctions(bundle: bundle, module: module)
+        await runBoundedPreludeScan(ranges: ranges, module: module)
+
+        let analysis = ModuleAnalysis(
+            sessionID: sessionID,
+            moduleName: module.name,
+            moduleUUID: identity,
+            executableRanges: ranges.map { .init(offset: $0.offset, size: $0.size) },
+            functions: functions,
+            aapDone: true
+        )
+        try? store.save(analysis)
+    }
+
+    private func replayAnalysis(_ analysis: ModuleAnalysis, module: ProcessModule) async {
+        for function in analysis.functions {
+            let addr = module.base &+ function.offset
+            await defineFunction(at: addr, name: function.name)
+        }
+    }
+
+    private func registerKnownFunctions(bundle: ModuleSymbolBundle?, module: ProcessModule) async -> [ModuleAnalysis.Function] {
+        guard let bundle else { return [] }
+        var result: [ModuleAnalysis.Function] = []
+        var seenOffsets: Set<UInt64> = []
+        let lo = module.base
+        let hi = module.base &+ module.size
+
+        for export in bundle.exports where export.kind == .function {
+            guard export.address >= lo, export.address < hi else { continue }
+            let offset = export.address &- lo
+            await defineFunction(at: export.address, name: export.name)
+            result.append(.init(offset: offset, name: export.name, source: .exported))
+            seenOffsets.insert(offset)
+        }
+        for symbol in bundle.symbols where symbol.isCode {
+            guard symbol.address >= lo, symbol.address < hi else { continue }
+            let offset = symbol.address &- lo
+            if seenOffsets.contains(offset) { continue }
+            await defineFunction(at: symbol.address, name: symbol.name)
+            result.append(.init(offset: offset, name: symbol.name, source: .symbol))
+            seenOffsets.insert(offset)
+        }
+        return result
+    }
+
+    private func runBoundedPreludeScan(ranges: [ProcessNode.ModuleRange], module: ProcessModule) async {
+        for range in ranges {
+            let lo = module.base &+ range.offset
+            let hi = lo &+ range.size
+            _ = await r2.cmd("e search.from=0x\(String(lo, radix: 16))")
+            _ = await r2.cmd("e search.to=0x\(String(hi, radix: 16))")
             _ = await r2.cmd("aap")
-            didRunPreludeScan = true
-            if let primed = await fetchFunctionBegin(hex: hex) {
-                return primed
-            }
         }
-        return nil
+    }
+
+    private func defineFunction(at address: UInt64, name: String?) async {
+        guard address != 0 else { return }
+        let hex = String(address, radix: 16)
+        if let name, !name.isEmpty {
+            _ = await r2.cmd("af 0x\(hex) \(r2FlagSafe(name))")
+        } else {
+            _ = await r2.cmd("af 0x\(hex)")
+        }
+    }
+
+    private func r2FlagSafe(_ name: String) -> String {
+        name.map { c -> Character in
+            if c.isLetter || c.isNumber || c == "_" || c == "." { return c }
+            return "_"
+        }.reduce(into: "") { $0.append($1) }
     }
 
     private func fetchFunctionBegin(hex: String) async -> UInt64? {
@@ -194,6 +333,10 @@ private struct R2DisasmOp: Decodable {
     var addrValue: UInt64 { UInt64(addr.dropFirst(2), radix: 16) ?? 0 }
     var arrowValue: UInt64? { arrow.flatMap { UInt64($0.dropFirst(2), radix: 16) } }
     var callValue: UInt64? { call.flatMap { UInt64($0.dropFirst(2), radix: 16) } }
+
+    var isInstructionEntry: Bool {
+        StyledText.parseAnsi(text).plainText.contains(addr)
+    }
 
     func toDisassemblyLine() -> DisassemblyLine {
         let styled = StyledText.parseAnsi(text)

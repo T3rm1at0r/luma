@@ -2104,7 +2104,7 @@ public final class Engine {
         guard let node = node(forSessionID: sessionID),
             let info = session(id: sessionID)?.processInfo
         else { return nil }
-        let d = Disassembler(node: node, processInfo: info)
+        let d = Disassembler(node: node, sessionID: sessionID, processInfo: info, store: store)
         disassemblers[sessionID] = d
         return d
     }

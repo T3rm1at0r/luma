@@ -500,6 +500,21 @@ public final class ProjectStore: Sendable {
         }
     }
 
+    public func fetchModuleAnalysis(sessionID: UUID, moduleName: String) throws -> ModuleAnalysis? {
+        try db.read { db in
+            try ModuleAnalysis
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("module_name") == moduleName)
+                .fetchOne(db)
+        }
+    }
+
+    public func save(_ analysis: ModuleAnalysis) throws {
+        try db.write { db in
+            try analysis.save(db)
+        }
+    }
+
     public func save(_ message: AddressNoteMessage) throws {
         try db.write { db in
             try message.save(db)
@@ -1269,6 +1284,18 @@ public final class ProjectStore: Sendable {
             t.column("model_id", .text)
             t.column("action_id", .text)
             t.column("created_at", .datetime).notNull()
+        }
+
+        try db.create(table: "module_analysis", ifNotExists: true) { t in
+            t.column("session_id", .text).notNull()
+                .references("process_session", onDelete: .cascade)
+            t.column("module_name", .text).notNull()
+            t.column("module_uuid", .text)
+            t.column("executable_ranges", .blob).notNull()
+            t.column("functions", .blob).notNull()
+            t.column("aap_done", .boolean).notNull()
+            t.column("analyzed_at", .datetime).notNull()
+            t.primaryKey(["session_id", "module_name"])
         }
 
         try db.create(table: "remote_device_config", ifNotExists: true) { t in

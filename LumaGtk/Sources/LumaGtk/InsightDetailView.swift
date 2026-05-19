@@ -50,6 +50,7 @@ final class InsightDetailView {
     private var loadTask: Task<Void, Never>?
     private var refreshDebounce: Task<Void, Never>?
     private var isLoadingMore = false
+    private var disasmScope: DisassemblyScope = .span
     private var isDarkMode = false
     private var themeSignalID: gulong = 0
     private var valueChangedHandler: gulong = 0
@@ -381,11 +382,13 @@ final class InsightDetailView {
                     showErrorLabel("Disassembler unavailable.")
                     return
                 }
-                let lines = await disassembler.disassemble(
+                let page = await disassembler.disassemblePage(
                     DisassemblyRequest(address: resolved, count: Self.initialChunk, isDarkMode: self.isDarkMode)
                 )
                 if Task.isCancelled { return }
 
+                self.disasmScope = page.scope
+                let lines = page.lines
                 self.disasmLines = lines
                 for line in lines {
                     let row = self.makeDisasmRow(line: line)
@@ -433,6 +436,7 @@ final class InsightDetailView {
     private func loadMore() {
         guard !isLoadingMore else { return }
         guard insight.kind == .disassembly else { return }
+        guard disasmScope == .span else { return }
         guard let last = disasmLines.last else { return }
         guard let engine, let disassembler = engine.disassembler(forSessionID: sessionID) else { return }
 
@@ -826,7 +830,12 @@ final class InsightDetailView {
             )
             return
         }
-        jumpTo(target: target)
+        do {
+            let insight = try engine.getOrCreateInsight(sessionID: sessionID, pointer: target, kind: .disassembly)
+            AddressActionMenu.navigator?(sessionID, insight.id)
+        } catch {
+            AddressActionMenu.errorReporter?("Can\u{2019}t open function: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Theme

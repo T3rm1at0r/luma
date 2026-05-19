@@ -15,6 +15,7 @@ struct AddressInsightDetailView: View {
     @State private var disasmLines: [DisassemblyLine] = []
     @State private var errorText: AttributedString?
     @State private var isLoadingMore = false
+    @State private var disasmScope: DisassemblyScope = .span
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -136,10 +137,11 @@ struct AddressInsightDetailView: View {
                 }
 
             case .disassembly:
-                let ops = await fetchDisasm(node: node, start: resolved, count: 64)
+                let page = await fetchDisasmPage(node: node, start: resolved, count: 64)
                 if Task.isCancelled { return }
 
-                disasmLines = ops
+                disasmLines = page.lines
+                disasmScope = page.scope
                 memoryData = Data()
             }
         }
@@ -148,6 +150,7 @@ struct AddressInsightDetailView: View {
     private func loadMoreDisasm() {
         guard !isLoadingMore else { return }
         guard insight.kind == .disassembly else { return }
+        guard disasmScope == .span else { return }
         guard let node else { return }
         guard let last = disasmLines.last else { return }
 
@@ -156,11 +159,11 @@ struct AddressInsightDetailView: View {
         Task { @MainActor in
             defer { isLoadingMore = false }
 
-            let decoded = await fetchDisasm(
+            let decoded = await fetchDisasmPage(
                 node: node,
                 start: last.address,
                 count: 64
-            )
+            ).lines
 
             guard !Task.isCancelled else { return }
             guard !decoded.isEmpty else { return }
@@ -173,15 +176,15 @@ struct AddressInsightDetailView: View {
         }
     }
 
-    private func fetchDisasm(
+    private func fetchDisasmPage(
         node: LumaCore.ProcessNode,
         start: UInt64,
         count: Int = 64
-    ) async -> [DisassemblyLine] {
+    ) async -> DisassemblyPage {
         guard let disassembler = engine.disassembler(forSessionID: session.id) else {
-            return []
+            return DisassemblyPage(lines: [], scope: .span)
         }
-        return await disassembler.disassemble(
+        return await disassembler.disassemblePage(
             DisassemblyRequest(address: start, count: count, isDarkMode: colorScheme == .dark)
         )
     }
@@ -603,9 +606,10 @@ private struct DisasmRow: View {
             return
         }
         do {
-            try onJump(target)
+            let insight = try engine.getOrCreateInsight(sessionID: sessionID, pointer: target, kind: .disassembly)
+            selection = .insight(sessionID, insight.id)
         } catch {
-            errorPresenter.present("Can’t jump here", error.localizedDescription)
+            errorPresenter.present("Can’t open function", error.localizedDescription)
         }
     }
 }
