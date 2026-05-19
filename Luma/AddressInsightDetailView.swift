@@ -81,11 +81,6 @@ struct AddressInsightDetailView: View {
     }
 
     private func doRefresh() {
-        guard let node = node else {
-            errorText = AttributedString("Session detached.")
-            return
-        }
-
         refreshTask?.cancel()
         spinnerTask?.cancel()
         showRefreshSpinner = false
@@ -104,6 +99,7 @@ struct AddressInsightDetailView: View {
         let kind = insight.kind
         let byteCount = insight.byteCount
         let anchor = insight.anchor
+        let reader = engine.memoryReader(forSessionID: session.id)
 
         refreshTask = Task { @MainActor in
             defer {
@@ -111,22 +107,18 @@ struct AddressInsightDetailView: View {
                 showRefreshSpinner = false
             }
 
-            let resolved: UInt64
-            do {
-                resolved = try await node.resolve(anchor)
-            } catch {
+            guard let resolved = await engine.resolve(sessionID: session.id, anchor: anchor, hint: insight.lastResolvedAddress) else {
                 if Task.isCancelled { return }
-                errorText = AttributedString(error.localizedDescription)
+                errorText = AttributedString("Unable to resolve address while detached.")
                 return
             }
-
             if Task.isCancelled { return }
             insight.lastResolvedAddress = resolved
 
             switch kind {
             case .memory:
                 do {
-                    let bytes = try await node.readRemoteMemory(at: resolved, count: byteCount)
+                    let bytes = try await reader.read(at: resolved, count: byteCount)
                     if Task.isCancelled { return }
 
                     disasmLines = []
@@ -137,7 +129,7 @@ struct AddressInsightDetailView: View {
                 }
 
             case .disassembly:
-                let page = await fetchDisasmPage(node: node, start: resolved, count: 64)
+                let page = await fetchDisasmPage(start: resolved, count: 64)
                 if Task.isCancelled { return }
 
                 disasmLines = page.lines
@@ -151,7 +143,6 @@ struct AddressInsightDetailView: View {
         guard !isLoadingMore else { return }
         guard insight.kind == .disassembly else { return }
         guard disasmScope == .span else { return }
-        guard let node else { return }
         guard let last = disasmLines.last else { return }
 
         isLoadingMore = true
@@ -159,11 +150,7 @@ struct AddressInsightDetailView: View {
         Task { @MainActor in
             defer { isLoadingMore = false }
 
-            let decoded = await fetchDisasmPage(
-                node: node,
-                start: last.address,
-                count: 64
-            ).lines
+            let decoded = await fetchDisasmPage(start: last.address, count: 64).lines
 
             guard !Task.isCancelled else { return }
             guard !decoded.isEmpty else { return }
@@ -177,7 +164,6 @@ struct AddressInsightDetailView: View {
     }
 
     private func fetchDisasmPage(
-        node: LumaCore.ProcessNode,
         start: UInt64,
         count: Int = 64
     ) async -> DisassemblyPage {

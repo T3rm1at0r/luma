@@ -29,22 +29,46 @@ public struct DisassemblyPage: Sendable {
 }
 
 @MainActor
+public protocol ModuleIntrospector: AnyObject {
+    var isAvailable: Bool { get }
+    func getModuleIdentity(name: String) async throws -> String?
+    func enumerateModuleRanges(name: String) async throws -> [ProcessNode.ModuleRange]
+    func enumerateModuleSymbols(name: String) async throws -> ModuleSymbolBundle
+}
+
+@MainActor
+public protocol MemoryReader: AnyObject {
+    func read(at address: UInt64, count: Int) async throws -> [UInt8]
+}
+
+@MainActor
 public final class Disassembler {
-    private let node: ProcessNode
     private let sessionID: UUID
     private let processInfo: ProcessSession.ProcessInfo
     private let store: ProjectStore
+    private let modulesProvider: () -> [ProcessModule]
+    private let introspector: ModuleIntrospector
+    private let reader: MemoryReader
 
     private var r2: R2Core!
     private var openTask: Task<Void, Never>?
     private var currentDarkMode: Bool?
     private var analyzedModules: Set<String> = []
 
-    public init(node: ProcessNode, sessionID: UUID, processInfo: ProcessSession.ProcessInfo, store: ProjectStore) {
-        self.node = node
+    public init(
+        sessionID: UUID,
+        processInfo: ProcessSession.ProcessInfo,
+        store: ProjectStore,
+        modulesProvider: @escaping () -> [ProcessModule],
+        introspector: ModuleIntrospector,
+        reader: MemoryReader
+    ) {
         self.sessionID = sessionID
         self.processInfo = processInfo
         self.store = store
+        self.modulesProvider = modulesProvider
+        self.introspector = introspector
+        self.reader = reader
     }
 
     public func disassemble(_ request: DisassemblyRequest) async -> [DisassemblyLine] {
@@ -58,7 +82,7 @@ public final class Disassembler {
             currentDarkMode = request.isDarkMode
         }
         let hex = String(request.address, radix: 16)
-        if let module = node.modules.first(where: { request.address >= $0.base && request.address < ($0.base + $0.size) }) {
+        if let module = moduleContaining(address: request.address) {
             await ensureModuleAnalyzed(module: module)
         }
         if let bounded = await disassembleFunctionIfStart(at: request.address, hex: hex) {
@@ -106,27 +130,34 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
 
     public func findFunctionStart(containing address: UInt64) async -> UInt64? {
         await ensureOpened()
-        if let module = node.modules.first(where: { address >= $0.base && address < ($0.base + $0.size) }) {
+        if let module = moduleContaining(address: address) {
             await ensureModuleAnalyzed(module: module)
         }
         return await fetchFunctionBegin(hex: String(address, radix: 16))
     }
 
+    private func moduleContaining(address: UInt64) -> ProcessModule? {
+        modulesProvider().first { address >= $0.base && address < ($0.base &+ $0.size) }
+    }
+
     private func ensureModuleAnalyzed(module: ProcessModule) async {
         if analyzedModules.contains(module.name) { return }
-        analyzedModules.insert(module.name)
 
-        let identity = try? await node.getModuleIdentity(name: module.name)
+        let identity = try? await introspector.getModuleIdentity(name: module.name)
 
         if let existing = try? store.fetchModuleAnalysis(sessionID: sessionID, moduleName: module.name),
             existing.moduleUUID == identity
         {
+            analyzedModules.insert(module.name)
             await replayAnalysis(existing, module: module)
             return
         }
 
-        let ranges = (try? await node.enumerateModuleRanges(name: module.name)) ?? []
-        let bundle = try? await node.enumerateModuleSymbols(name: module.name)
+        guard introspector.isAvailable else { return }
+        analyzedModules.insert(module.name)
+
+        let ranges = (try? await introspector.enumerateModuleRanges(name: module.name)) ?? []
+        let bundle = try? await introspector.enumerateModuleSymbols(name: module.name)
 
         let functions = await registerKnownFunctions(bundle: bundle, module: module)
         await runBoundedPreludeScan(ranges: ranges, module: module)
@@ -235,7 +266,7 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
             self.r2 = r2
 
             await r2.registerIOPlugin(
-                asyncProvider: ProcessMemoryIOProvider(node: node),
+                asyncProvider: ProcessMemoryIOProvider(reader: reader),
                 uriSchemes: ["frida-mem://"]
             )
 
@@ -274,11 +305,76 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
     }
 }
 
-private final class ProcessMemoryIOProvider: R2IOAsyncProvider, @unchecked Sendable {
-    unowned let node: ProcessNode
+@MainActor
+public final class CachingMemoryReader: MemoryReader {
+    private let sessionID: UUID
+    private let store: ProjectStore
+    public var live: MemoryReader?
 
-    init(node: ProcessNode) {
-        self.node = node
+    public init(sessionID: UUID, store: ProjectStore, live: MemoryReader?) {
+        self.sessionID = sessionID
+        self.store = store
+        self.live = live
+    }
+
+    public func read(at address: UInt64, count: Int) async throws -> [UInt8] {
+        let end = address &+ UInt64(count)
+        var output: [UInt8] = []
+        output.reserveCapacity(count)
+
+        var cursor = address
+        while cursor < end {
+            let page = try await pageContaining(address: cursor)
+            let pageEnd = page.address &+ UInt64(page.bytes.count)
+            let copyEnd = min(end, pageEnd)
+            let offsetInPage = Int(cursor &- page.address)
+            let copyCount = Int(copyEnd &- cursor)
+            let slice = page.bytes.subdata(in: offsetInPage..<(offsetInPage + copyCount))
+            output.append(contentsOf: slice)
+            cursor = copyEnd
+        }
+        return output
+    }
+
+    private func pageContaining(address: UInt64) async throws -> ResolvedPage {
+        let base = MemoryPage.pageBase(of: address)
+        if let cached = try? store.fetchMemoryPage(sessionID: sessionID, pageAddress: base) {
+            return ResolvedPage(address: base, bytes: cached.bytes)
+        }
+        guard let live else {
+            throw DisassemblyError.notCached(pageAddress: base)
+        }
+        let raw = try await live.read(at: base, count: Int(MemoryPage.pageSize))
+        let data = Data(raw)
+        try? store.save(MemoryPage(sessionID: sessionID, pageAddress: base, bytes: data))
+        return ResolvedPage(address: base, bytes: data)
+    }
+
+    private struct ResolvedPage {
+        let address: UInt64
+        let bytes: Data
+    }
+}
+
+public enum DisassemblyError: Error, LocalizedError {
+    case notCached(pageAddress: UInt64)
+    case detached
+
+    public var errorDescription: String? {
+        switch self {
+        case .notCached(let page):
+            return "No cached memory at 0x\(String(page, radix: 16)). Reattach to fetch it."
+        case .detached:
+            return "Operation requires a live session."
+        }
+    }
+}
+
+private final class ProcessMemoryIOProvider: R2IOAsyncProvider, @unchecked Sendable {
+    unowned let reader: MemoryReader
+
+    init(reader: MemoryReader) {
+        self.reader = reader
     }
 
     func supports(path: String, many: Bool) -> Bool {
@@ -289,23 +385,23 @@ private final class ProcessMemoryIOProvider: R2IOAsyncProvider, @unchecked Senda
         guard let req = FridaMemURI.parse(path) else {
             throw NSError(domain: "LumaCore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid frida-mem URI"])
         }
-        return ProcessMemoryIOFile(node: node, baseAddress: req.baseAddress)
+        return ProcessMemoryIOFile(reader: reader, baseAddress: req.baseAddress)
     }
 }
 
 private final class ProcessMemoryIOFile: R2IOAsyncFile, @unchecked Sendable {
-    private unowned let node: ProcessNode
+    private unowned let reader: MemoryReader
     private let baseAddress: UInt64
 
-    init(node: ProcessNode, baseAddress: UInt64) {
-        self.node = node
+    init(reader: MemoryReader, baseAddress: UInt64) {
+        self.reader = reader
         self.baseAddress = baseAddress
     }
 
     func close() async throws {}
 
     func read(at offset: UInt64, count: Int) async throws -> [UInt8] {
-        try await node.readRemoteMemory(at: baseAddress &+ offset, count: count)
+        try await reader.read(at: baseAddress &+ offset, count: count)
     }
 
     func write(at offset: UInt64, bytes: [UInt8]) async throws -> Int { 0 }

@@ -515,6 +515,21 @@ public final class ProjectStore: Sendable {
         }
     }
 
+    public func fetchMemoryPage(sessionID: UUID, pageAddress: UInt64) throws -> MemoryPage? {
+        try db.read { db in
+            try MemoryPage
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("page_address") == Int64(bitPattern: pageAddress))
+                .fetchOne(db)
+        }
+    }
+
+    public func save(_ page: MemoryPage) throws {
+        try db.write { db in
+            try page.save(db)
+        }
+    }
+
     public func save(_ message: AddressNoteMessage) throws {
         try db.write { db in
             try message.save(db)
@@ -1284,6 +1299,15 @@ public final class ProjectStore: Sendable {
             t.column("model_id", .text)
             t.column("action_id", .text)
             t.column("created_at", .datetime).notNull()
+        }
+
+        try db.create(table: "memory_page", ifNotExists: true) { t in
+            t.column("session_id", .text).notNull()
+                .references("process_session", onDelete: .cascade)
+            t.column("page_address", .integer).notNull()
+            t.column("bytes", .blob).notNull()
+            t.column("captured_at", .datetime).notNull()
+            t.primaryKey(["session_id", "page_address"])
         }
 
         try db.create(table: "module_analysis", ifNotExists: true) { t in

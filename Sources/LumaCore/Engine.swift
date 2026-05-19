@@ -59,6 +59,7 @@ public final class Engine {
     public let customInstruments: CustomInstrumentLibrary
 
     @ObservationIgnored private var disassemblers: [UUID: Disassembler] = [:]
+    @ObservationIgnored private var memoryReaders: [UUID: CachingMemoryReader] = [:]
 
     public let collaboration: CollaborationSession
     public let gitHubAuth: GitHubAuth
@@ -1855,7 +1856,6 @@ public final class Engine {
             node.stop()
             addressAnnotations[sid] = nil
             tracerInstanceIDBySession[sid] = nil
-            disassemblers[sid] = nil
             updateSession(id: sid) { $0.phase = .idle }
         }
     }
@@ -2101,12 +2101,56 @@ public final class Engine {
 
     public func disassembler(forSessionID sessionID: UUID) -> Disassembler? {
         if let existing = disassemblers[sessionID] { return existing }
-        guard let node = node(forSessionID: sessionID),
-            let info = session(id: sessionID)?.processInfo
-        else { return nil }
-        let d = Disassembler(node: node, sessionID: sessionID, processInfo: info, store: store)
+        guard let info = session(id: sessionID)?.processInfo else { return nil }
+        let env = SessionDisassemblyEnvironment(engine: self, sessionID: sessionID)
+        let reader = memoryReader(forSessionID: sessionID, live: env)
+        let d = Disassembler(
+            sessionID: sessionID,
+            processInfo: info,
+            store: store,
+            modulesProvider: { [weak self] in self?.modulesSnapshot(forSessionID: sessionID) ?? [] },
+            introspector: env,
+            reader: reader
+        )
         disassemblers[sessionID] = d
         return d
+    }
+
+    public func memoryReader(forSessionID sessionID: UUID) -> MemoryReader {
+        let env = SessionDisassemblyEnvironment(engine: self, sessionID: sessionID)
+        return memoryReader(forSessionID: sessionID, live: env)
+    }
+
+    private func memoryReader(forSessionID sessionID: UUID, live: MemoryReader) -> CachingMemoryReader {
+        if let existing = memoryReaders[sessionID] {
+            existing.live = live
+            return existing
+        }
+        let reader = CachingMemoryReader(sessionID: sessionID, store: store, live: live)
+        memoryReaders[sessionID] = reader
+        return reader
+    }
+
+    func modulesSnapshot(forSessionID sessionID: UUID) -> [ProcessModule] {
+        if let node = node(forSessionID: sessionID) { return node.modules }
+        return session(id: sessionID)?.lastKnownModules ?? []
+    }
+
+    public func resolve(sessionID: UUID, anchor: AddressAnchor, hint: UInt64? = nil) async -> UInt64? {
+        if let node = node(forSessionID: sessionID), let resolved = try? await node.resolve(anchor) {
+            return resolved
+        }
+        switch anchor {
+        case .absolute(let a):
+            return a
+        case .moduleOffset(let name, let offset):
+            if let base = modulesSnapshot(forSessionID: sessionID).first(where: { $0.name == name })?.base {
+                return base &+ offset
+            }
+            return hint
+        case .moduleExport, .objcMethod, .swiftFunc, .debugSymbol, .javaMethod:
+            return hint
+        }
     }
 
     public func updateSession(id: UUID, _ mutate: (inout ProcessSession) -> Void) {
@@ -4759,6 +4803,43 @@ public final class Engine {
 
 public struct TracerHookCompileFailures: Swift.Error {
     public let hookErrors: [UUID: any Swift.Error]
+}
+
+@MainActor
+final class SessionDisassemblyEnvironment: ModuleIntrospector, MemoryReader {
+    private unowned let engine: Engine
+    private let sessionID: UUID
+
+    init(engine: Engine, sessionID: UUID) {
+        self.engine = engine
+        self.sessionID = sessionID
+    }
+
+    var isAvailable: Bool { engine.node(forSessionID: sessionID) != nil }
+
+    func getModuleIdentity(name: String) async throws -> String? {
+        guard let node = engine.node(forSessionID: sessionID) else { return nil }
+        return try await node.getModuleIdentity(name: name)
+    }
+
+    func enumerateModuleRanges(name: String) async throws -> [ProcessNode.ModuleRange] {
+        guard let node = engine.node(forSessionID: sessionID) else { return [] }
+        return try await node.enumerateModuleRanges(name: name)
+    }
+
+    func enumerateModuleSymbols(name: String) async throws -> ModuleSymbolBundle {
+        guard let node = engine.node(forSessionID: sessionID) else {
+            throw DisassemblyError.detached
+        }
+        return try await node.enumerateModuleSymbols(name: name)
+    }
+
+    func read(at address: UInt64, count: Int) async throws -> [UInt8] {
+        guard let node = engine.node(forSessionID: sessionID) else {
+            throw DisassemblyError.detached
+        }
+        return try await node.readRemoteMemory(at: address, count: count)
+    }
 }
 
 private actor ConsoleReplyBuffer {

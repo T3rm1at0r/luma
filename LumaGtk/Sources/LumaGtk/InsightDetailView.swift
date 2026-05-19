@@ -338,27 +338,19 @@ final class InsightDetailView {
             setContent(disasmHost)
         }
 
-        guard let node = engine.node(forSessionID: sessionID) else {
-            setSpinnerVisible(false)
-            showErrorLabel("Session detached.")
-            return
-        }
-
         scheduleSpinner()
 
         let anchor = insight.anchor
         let byteCount = insight.byteCount
         let kind = insight.kind
+        let reader = engine.memoryReader(forSessionID: sessionID)
 
         loadTask = Task { @MainActor in
             defer { setSpinnerVisible(false) }
 
-            let resolved: UInt64
-            do {
-                resolved = try await node.resolve(anchor)
-            } catch {
+            guard let resolved = await engine.resolve(sessionID: sessionID, anchor: anchor, hint: insight.lastResolvedAddress) else {
                 if Task.isCancelled { return }
-                showErrorLabel(error.localizedDescription)
+                showErrorLabel("Unable to resolve address while detached.")
                 return
             }
             if Task.isCancelled { return }
@@ -369,7 +361,7 @@ final class InsightDetailView {
             switch kind {
             case .memory:
                 do {
-                    let bytes = try await node.readRemoteMemory(at: resolved, count: byteCount)
+                    let bytes = try await reader.read(at: resolved, count: byteCount)
                     if Task.isCancelled { return }
                     hexView?.setBytes(Data(bytes), baseAddress: resolved)
                 } catch {
