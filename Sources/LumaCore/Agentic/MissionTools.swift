@@ -3263,7 +3263,7 @@ public enum MissionTools {
             inputSchemaJSON: """
                 {"type":"object","properties":{"session_id":{"type":"string"},"insight_id":{"type":"string"},"title":{"type":"string","minLength":1}},"required":["session_id","insight_id","title"],"additionalProperties":false}
                 """,
-            isObserve: false,
+            isObserve: true,
             requiresSession: true
         )
         catalog.register(spec: spec) { [weak engine] invocation in
