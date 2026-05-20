@@ -34,7 +34,13 @@ private final class HookPackDetailUI: InstrumentDetailUI {
         outer.marginTop = 8
         outer.marginBottom = 12
         self.outer = outer
-        widget = outer
+
+        let scroll = ScrolledWindow()
+        scroll.hexpand = true
+        scroll.vexpand = true
+        scroll.setPolicy(hscrollbarPolicy: .never, vscrollbarPolicy: .automatic)
+        scroll.set(child: outer)
+        widget = scroll
 
         rebuild()
     }

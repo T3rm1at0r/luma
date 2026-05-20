@@ -14,42 +14,43 @@ struct CustomInstrumentConfigView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                header
 
-            GroupBox("Features") {
-                Group {
-                    if let def, !def.features.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(def.features) { feature in
-                                InstrumentFeatureRow(
-                                    feature: feature,
-                                    state: stateBinding(for: feature)
-                                )
+                GroupBox("Features") {
+                    Group {
+                        if let def, !def.features.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(def.features) { feature in
+                                    InstrumentFeatureRow(
+                                        feature: feature,
+                                        state: stateBinding(for: feature)
+                                    )
+                                }
                             }
+                        } else {
+                            Text("This custom instrument does not declare any features.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
-                    } else {
-                        Text("This custom instrument does not declare any features.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
                     }
+                    .padding(.leading, 12)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.leading, 12)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
 
-            if let def {
-                InstrumentWidgetsRenderer(
-                    widgets: def.widgets,
-                    engine: engine,
-                    selection: $selection
-                )
+                if let def {
+                    InstrumentWidgetsRenderer(
+                        widgets: def.widgets,
+                        engine: engine,
+                        selection: $selection
+                    )
+                }
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
         }
-        .padding(8)
     }
 
     private var header: some View {

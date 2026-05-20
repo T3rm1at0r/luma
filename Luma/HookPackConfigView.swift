@@ -8,44 +8,45 @@ struct HookPackConfigView: View {
     @Binding var selection: SidebarItemID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                InstrumentIconView(icon: pack.resolvedIcon, pointSize: 14)
-                Text(pack.manifest.name).font(.headline)
-                Spacer()
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    InstrumentIconView(icon: pack.resolvedIcon, pointSize: 14)
+                    Text(pack.manifest.name).font(.headline)
+                    Spacer()
+                }
 
-            GroupBox("Features") {
-                Group {
-                    if pack.manifest.features.isEmpty {
-                        Text("This hook-pack does not declare any features.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(pack.manifest.features) { feature in
-                                InstrumentFeatureRow(
-                                    feature: feature,
-                                    state: stateBinding(for: feature)
-                                )
+                GroupBox("Features") {
+                    Group {
+                        if pack.manifest.features.isEmpty {
+                            Text("This hook-pack does not declare any features.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(pack.manifest.features) { feature in
+                                    InstrumentFeatureRow(
+                                        feature: feature,
+                                        state: stateBinding(for: feature)
+                                    )
+                                }
                             }
                         }
                     }
+                    .padding(.leading, 12)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.leading, 12)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                InstrumentWidgetsRenderer(
+                    widgets: pack.manifest.widgets,
+                    engine: engine,
+                    selection: $selection
+                )
             }
-
-            InstrumentWidgetsRenderer(
-                widgets: pack.manifest.widgets,
-                engine: engine,
-                selection: $selection
-            )
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
         }
-        .padding(8)
     }
 
     private func stateBinding(for feature: CustomInstrumentDef.Feature) -> Binding<FeatureState> {
