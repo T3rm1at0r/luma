@@ -179,8 +179,8 @@ final class TracerConfigEditor {
                 existingHookByAnchor: { [weak self] anchor in
                     self?.config.hooks.first(where: { $0.addressAnchor == anchor })
                 },
-                onPick: { [weak self] api in
-                    self?.appendHook(for: api)
+                onPick: { [weak self] apis in
+                    self?.handlePickedAPIs(apis)
                 },
                 onView: { [weak self] hook in
                     self?.onHookAdded?(hook.id)
@@ -296,8 +296,8 @@ final class TracerConfigEditor {
             existingHookByAnchor: { [weak self] anchor in
                 self?.config.hooks.first(where: { $0.addressAnchor == anchor })
             },
-            onPick: { [weak self] api in
-                self?.appendHook(for: api)
+            onPick: { [weak self] apis in
+                self?.handlePickedAPIs(apis)
                 self?.dismissAddPopover()
             },
             onView: { [weak self] hook in
@@ -321,19 +321,37 @@ final class TracerConfigEditor {
         popoverSearch = nil
     }
 
-    fileprivate func appendHook(for api: ResolvedApi) {
-        let hook = TracerConfig.Hook(
+    fileprivate func handlePickedAPIs(_ apis: [ResolvedApi]) {
+        let wasInEmptyMode = config.hooks.isEmpty || forceEmptyState
+        let newHooks = apis.map(makeHook(for:))
+        config.hooks.append(contentsOf: newHooks)
+        forceEmptyState = false
+
+        let navigateTarget: TracerConfig.Hook? = newHooks.count == 1 ? newHooks.first : nil
+        if let target = navigateTarget {
+            selectedHookID = target.id
+        }
+
+        emit()
+
+        if wasInEmptyMode {
+            rebuildContent()
+        } else if let target = navigateTarget {
+            editorPane?.setHook(target)
+        }
+
+        if let target = navigateTarget {
+            onHookAdded?(target.id)
+        }
+    }
+
+    private func makeHook(for api: ResolvedApi) -> TracerConfig.Hook {
+        TracerConfig.Hook(
             displayName: api.displayName,
             addressAnchor: api.anchor,
             kind: .function,
             code: defaultTracerCode(kind: .function, anchor: api.anchor, displayName: api.displayName)
         )
-        config.hooks.append(hook)
-        forceEmptyState = false
-        selectedHookID = hook.id
-        emit()
-        rebuildContent()
-        onHookAdded?(hook.id)
     }
 }
 
@@ -385,7 +403,7 @@ private final class TracerHookSearch {
 
     private weak var engine: Engine?
     private let sessionID: UUID
-    private let onPick: (TracerConfigEditor.ResolvedApi) -> Void
+    private let onPick: ([TracerConfigEditor.ResolvedApi]) -> Void
     private let existingHookByAnchor: (AddressAnchor) -> TracerConfig.Hook?
     private let onView: (TracerConfig.Hook) -> Void
 
@@ -415,7 +433,7 @@ private final class TracerHookSearch {
         layout: Layout,
         hasExistingHooks: Bool = false,
         existingHookByAnchor: @escaping (AddressAnchor) -> TracerConfig.Hook?,
-        onPick: @escaping (TracerConfigEditor.ResolvedApi) -> Void,
+        onPick: @escaping ([TracerConfigEditor.ResolvedApi]) -> Void,
         onView: @escaping (TracerConfig.Hook) -> Void
     ) {
         self.engine = engine
@@ -582,9 +600,8 @@ private final class TracerHookSearch {
         addAllButton.onClicked { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                for api in self.results where self.existingHookByAnchor(api.anchor) == nil {
-                    self.onPick(api)
-                }
+                let toAdd = self.results.filter { self.existingHookByAnchor($0.anchor) == nil }
+                self.onPick(toAdd)
             }
         }
 
@@ -821,7 +838,7 @@ private final class TracerHookSearch {
                     if let existing = anchor.existingHookByAnchor(api.anchor) {
                         anchor.onView(existing)
                     } else {
-                        anchor.onPick(api)
+                        anchor.onPick([api])
                     }
                 }
             }

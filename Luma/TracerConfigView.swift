@@ -774,11 +774,19 @@ struct TracerConfigView: View {
     }
 
     private func addAllResultsAsHooks() {
-        for api in resolveResults {
-            if existingHook(for: api) == nil {
-                _ = addResultAsHook(api, select: false)
-            }
+        var hooks = config.hooks
+        let existingAnchors = Set(hooks.map(\.addressAnchor))
+        for api in resolveResults where !existingAnchors.contains(api.anchor) {
+            hooks.append(
+                TracerConfig.Hook(
+                    displayName: api.displayName,
+                    addressAnchor: api.anchor,
+                    kind: .function,
+                    code: defaultTracerCode(kind: .function, anchor: api.anchor, displayName: api.displayName)
+                )
+            )
         }
+        config.hooks = hooks
         isShowingSearchPopover = false
     }
 
