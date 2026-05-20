@@ -256,6 +256,21 @@ enum StyleSheet {
         background: alpha(@theme_fg_color, 0.05);
     }
 
+    button.luma-js-show-more {
+        background: none;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+        min-height: 0;
+        color: @accent_color;
+    }
+    button.luma-js-show-more:hover {
+        background: none;
+    }
+    button.luma-js-show-more > label {
+        text-decoration: underline;
+    }
+
     .luma-session-icon {
         border-radius: 4px;
         box-shadow: inset 0 0 0 1px alpha(@accent_bg_color, 0.4);

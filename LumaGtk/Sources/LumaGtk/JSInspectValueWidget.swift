@@ -3,6 +3,71 @@ import Gtk
 import LumaCore
 
 @MainActor
+private final class ChunkedRowsPager {
+    private let body: Box
+    private let count: Int
+    private let noun: String
+    private var shown: Int
+    private let makeRow: (Int, inout [Any]) -> Widget
+    private var deferredKeepers: [Any] = []
+    private var currentButton: Button?
+    private var lastRow: Widget
+
+    init(
+        body: Box,
+        count: Int,
+        noun: String,
+        shown: Int,
+        lastRow: Widget,
+        makeRow: @escaping (Int, inout [Any]) -> Widget
+    ) {
+        self.body = body
+        self.count = count
+        self.noun = noun
+        self.shown = shown
+        self.lastRow = lastRow
+        self.makeRow = makeRow
+    }
+
+    func installButton() {
+        let button = Button(label: "")
+        button.halign = .start
+        button.add(cssClass: "luma-js-show-more")
+        button.onClicked { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.advance()
+            }
+        }
+        body.append(child: button)
+        currentButton = button
+        updateButtonLabel()
+    }
+
+    private func advance() {
+        guard let button = currentButton else { return }
+        let chunkEnd = min(shown + JSInspectValueWidget.chunkSize, count)
+        for idx in shown..<chunkEnd {
+            let row = makeRow(idx, &deferredKeepers)
+            body.insertChildAfter(child: row, sibling: lastRow)
+            lastRow = row
+        }
+        shown = chunkEnd
+        if shown < count {
+            updateButtonLabel()
+        } else {
+            button.visible = false
+        }
+    }
+
+    private func updateButtonLabel() {
+        guard let button = currentButton else { return }
+        let remaining = count - shown
+        let next = min(JSInspectValueWidget.chunkSize, remaining)
+        button.label = "Show \(next) more (\(remaining) \(noun) left)…"
+    }
+}
+
+@MainActor
 final class JSInspectValueWidget {
     let widget: Widget
 
@@ -16,6 +81,7 @@ final class JSInspectValueWidget {
         var keepers: [Any] = []
         self.widget = Self.build(
             value: value,
+            depth: 0,
             engine: engine,
             sessionID: sessionID,
             keepAlive: &keepers
@@ -23,24 +89,27 @@ final class JSInspectValueWidget {
         self.keepAlive = keepers
     }
 
+    fileprivate static let chunkSize = 5
+
     private static func build(
         value: JSInspectValue,
+        depth: Int,
         engine: Engine,
         sessionID: UUID,
         keepAlive: inout [Any]
     ) -> Widget {
         switch value {
         case .object(_, let props):
-            return makeObjectExpander(props: props, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            return makeObjectExpander(props: props, depth: depth, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
 
         case .array(_, let elements):
-            return makeArrayExpander(elements: elements, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            return makeArrayExpander(elements: elements, depth: depth, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
 
         case .map(_, let entries):
-            return makeMapExpander(entries: entries, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            return makeMapExpander(entries: entries, depth: depth, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
 
         case .set(_, let elements):
-            return makeSetExpander(elements: elements, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            return makeSetExpander(elements: elements, depth: depth, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
 
         case .bytes(let bytes):
             return makeBytesView(bytes: bytes, keepAlive: &keepAlive)
@@ -55,6 +124,7 @@ final class JSInspectValueWidget {
 
     private static func makeObjectExpander(
         props: [JSInspectValue.Property],
+        depth: Int,
         engine: Engine,
         sessionID: UUID,
         keepAlive: inout [Any]
@@ -62,29 +132,33 @@ final class JSInspectValueWidget {
         if props.isEmpty {
             return labelWithMarkup(span("{}", color: cyan))
         }
-        let body = Box(orientation: .vertical, spacing: 2)
-        body.marginStart = 16
-        body.hexpand = true
-        for prop in props {
+        let body = makeBodyBox()
+        appendChunkedRows(into: body, count: props.count, noun: "properties", keepAlive: &keepAlive) { idx, keepers in
+            let prop = props[idx]
             let row = Box(orientation: .horizontal, spacing: 4)
             row.hexpand = true
-            row.append(child: labelWithMarkup(span(escape(prop.displayKey + ":"), color: green)))
-            let child = build(value: prop.value, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            let key = labelWithMarkup(span(escape(prop.displayKey + ":"), color: green))
+            key.valign = .start
+            if isComposite(prop.value) { key.marginTop = 2 }
+            row.append(child: key)
+            let child = build(value: prop.value, depth: depth + 1, engine: engine, sessionID: sessionID, keepAlive: &keepers)
             child.hexpand = true
             child.halign = .start
             row.append(child: child)
-            body.append(child: row)
+            return row
         }
         return makeExpander(
             title: "Object{\(props.count)}",
             preview: inlinePreview(forObjectProps: props),
             color: cyan,
+            depth: depth,
             body: body
         )
     }
 
     private static func makeArrayExpander(
         elements: [JSInspectValue],
+        depth: Int,
         engine: Engine,
         sessionID: UUID,
         keepAlive: inout [Any]
@@ -92,29 +166,32 @@ final class JSInspectValueWidget {
         if elements.isEmpty {
             return labelWithMarkup(span("[]", color: cyan))
         }
-        let body = Box(orientation: .vertical, spacing: 2)
-        body.marginStart = 16
-        body.hexpand = true
-        for (idx, element) in elements.enumerated() {
+        let body = makeBodyBox()
+        appendChunkedRows(into: body, count: elements.count, noun: "items", keepAlive: &keepAlive) { idx, keepers in
             let row = Box(orientation: .horizontal, spacing: 4)
             row.hexpand = true
-            row.append(child: labelWithMarkup(span("[\(idx)]", color: dim)))
-            let child = build(value: element, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            let indexLabel = labelWithMarkup(span("[\(idx)]", color: dim))
+            indexLabel.valign = .start
+            if isComposite(elements[idx]) { indexLabel.marginTop = 2 }
+            row.append(child: indexLabel)
+            let child = build(value: elements[idx], depth: depth + 1, engine: engine, sessionID: sessionID, keepAlive: &keepers)
             child.hexpand = true
             child.halign = .start
             row.append(child: child)
-            body.append(child: row)
+            return row
         }
         return makeExpander(
             title: "Array[\(elements.count)]",
             preview: inlinePreview(forArrayElements: elements),
             color: cyan,
+            depth: depth,
             body: body
         )
     }
 
     private static func makeMapExpander(
         entries: [JSInspectValue.Property],
+        depth: Int,
         engine: Engine,
         sessionID: UUID,
         keepAlive: inout [Any]
@@ -122,26 +199,30 @@ final class JSInspectValueWidget {
         if entries.isEmpty {
             return labelWithMarkup(span("Map{}", color: cyan))
         }
-        let body = Box(orientation: .vertical, spacing: 2)
-        body.marginStart = 16
-        body.hexpand = true
-        for entry in entries {
+        let body = makeBodyBox()
+        appendChunkedRows(into: body, count: entries.count, noun: "entries", keepAlive: &keepAlive) { idx, keepers in
+            let entry = entries[idx]
             let row = Box(orientation: .horizontal, spacing: 4)
             row.hexpand = true
-            let keyChild = build(value: entry.key, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            let keyChild = build(value: entry.key, depth: depth + 1, engine: engine, sessionID: sessionID, keepAlive: &keepers)
+            keyChild.valign = .start
             row.append(child: keyChild)
-            row.append(child: labelWithMarkup(span("→", color: dim)))
-            let valChild = build(value: entry.value, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            let arrow = labelWithMarkup(span("→", color: dim))
+            arrow.valign = .start
+            if isComposite(entry.value) { arrow.marginTop = 2 }
+            row.append(child: arrow)
+            let valChild = build(value: entry.value, depth: depth + 1, engine: engine, sessionID: sessionID, keepAlive: &keepers)
             valChild.hexpand = true
             valChild.halign = .start
             row.append(child: valChild)
-            body.append(child: row)
+            return row
         }
-        return makeExpander(title: "Map{\(entries.count)}", preview: nil, color: cyan, body: body)
+        return makeExpander(title: "Map{\(entries.count)}", preview: nil, color: cyan, depth: depth, body: body)
     }
 
     private static func makeSetExpander(
         elements: [JSInspectValue],
+        depth: Int,
         engine: Engine,
         sessionID: UUID,
         keepAlive: inout [Any]
@@ -149,29 +230,75 @@ final class JSInspectValueWidget {
         if elements.isEmpty {
             return labelWithMarkup(span("Set{}", color: cyan))
         }
-        let body = Box(orientation: .vertical, spacing: 2)
-        body.marginStart = 16
-        body.hexpand = true
-        for element in elements {
+        let body = makeBodyBox()
+        appendChunkedRows(into: body, count: elements.count, noun: "items", keepAlive: &keepAlive) { idx, keepers in
             let row = Box(orientation: .horizontal, spacing: 4)
             row.hexpand = true
-            row.append(child: labelWithMarkup(span("•", color: dim)))
-            let child = build(value: element, engine: engine, sessionID: sessionID, keepAlive: &keepAlive)
+            let bullet = labelWithMarkup(span("•", color: dim))
+            bullet.valign = .start
+            if isComposite(elements[idx]) { bullet.marginTop = 2 }
+            row.append(child: bullet)
+            let child = build(value: elements[idx], depth: depth + 1, engine: engine, sessionID: sessionID, keepAlive: &keepers)
             child.hexpand = true
             child.halign = .start
             row.append(child: child)
-            body.append(child: row)
+            return row
         }
-        return makeExpander(title: "Set{\(elements.count)}", preview: nil, color: cyan, body: body)
+        return makeExpander(title: "Set{\(elements.count)}", preview: nil, color: cyan, depth: depth, body: body)
     }
 
-    private static func makeExpander(title: String, preview: String?, color: String, body: Widget) -> Widget {
+    private static func isComposite(_ value: JSInspectValue) -> Bool {
+        switch value {
+        case .object, .array, .map, .set: return true
+        default: return false
+        }
+    }
+
+    private static func makeBodyBox() -> Box {
+        let body = Box(orientation: .vertical, spacing: 2)
+        body.marginStart = 16
+        body.hexpand = true
+        return body
+    }
+
+    private static func appendChunkedRows(
+        into body: Box,
+        count: Int,
+        noun: String,
+        keepAlive: inout [Any],
+        makeRow: @escaping (Int, inout [Any]) -> Widget
+    ) {
+        let initial = min(count, chunkSize)
+        var lastRow: Widget?
+        for idx in 0..<initial {
+            let row = makeRow(idx, &keepAlive)
+            body.append(child: row)
+            lastRow = row
+        }
+        guard count > initial, let lastRow else { return }
+        let pager = ChunkedRowsPager(
+            body: body,
+            count: count,
+            noun: noun,
+            shown: initial,
+            lastRow: lastRow,
+            makeRow: makeRow
+        )
+        keepAlive.append(pager)
+        pager.installButton()
+    }
+
+    private static func makeExpander(title: String, preview: String?, color: String, depth: Int, body: Widget) -> Widget {
         let expander = Expander(label: "")
         expander.add(cssClass: "luma-js-expander")
-        expander.expanded = true
+        let initiallyExpanded = (depth == 0)
+        expander.expanded = initiallyExpanded
         expander.halign = .start
+        if depth > 0 {
+            expander.marginStart = -6
+        }
         let titleLabel = Label(str: "")
-        titleLabel.setMarkup(str: headerMarkup(title: title, preview: nil, color: color))
+        titleLabel.setMarkup(str: headerMarkup(title: title, preview: initiallyExpanded ? nil : preview, color: color))
         titleLabel.add(cssClass: "monospace")
         titleLabel.halign = .start
         expander.set(labelWidget: titleLabel)
