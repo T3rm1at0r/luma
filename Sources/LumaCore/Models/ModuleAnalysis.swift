@@ -1,9 +1,7 @@
 import Foundation
 import GRDB
 
-public struct ModuleAnalysis: Codable, Sendable, FetchableRecord, PersistableRecord {
-    public static let databaseTableName = "module_analysis"
-
+public struct ModuleAnalysis: Codable, Sendable {
     public var sessionID: UUID
     public var modulePath: String
     public var moduleUUID: String?
@@ -44,14 +42,26 @@ public struct ModuleAnalysis: Codable, Sendable, FetchableRecord, PersistableRec
             case unwind
         }
 
+        public struct Block: Codable, Sendable, Hashable {
+            public var offset: UInt64
+            public var size: UInt64
+
+            public init(offset: UInt64, size: UInt64) {
+                self.offset = offset
+                self.size = size
+            }
+        }
+
         public var offset: UInt64
         public var name: String?
         public var source: Source
+        public var blocks: [Block]
 
-        public init(offset: UInt64, name: String?, source: Source) {
+        public init(offset: UInt64, name: String?, source: Source, blocks: [Block] = []) {
             self.offset = offset
             self.name = name
             self.source = source
+            self.blocks = blocks
         }
     }
 }
@@ -83,23 +93,4 @@ extension ModuleAnalysis {
         return analysis
     }
 
-    public func encode(to container: inout PersistenceContainer) {
-        container["session_id"] = sessionID
-        container["module_path"] = modulePath
-        container["module_uuid"] = moduleUUID
-        container["mapped_ranges"] = try? JSONEncoder().encode(mappedRanges)
-        container["functions"] = try? JSONEncoder().encode(functions)
-        container["analyzed_at"] = analyzedAt
-    }
-
-    public init(row: Row) throws {
-        sessionID = row["session_id"]
-        modulePath = row["module_path"]
-        moduleUUID = row["module_uuid"]
-        let rangesData: Data = row["mapped_ranges"]
-        let functionsData: Data = row["functions"]
-        mappedRanges = (try? JSONDecoder().decode([ProcessNode.ModuleRange].self, from: rangesData)) ?? []
-        functions = (try? JSONDecoder().decode([Function].self, from: functionsData)) ?? []
-        analyzedAt = row["analyzed_at"]
-    }
 }

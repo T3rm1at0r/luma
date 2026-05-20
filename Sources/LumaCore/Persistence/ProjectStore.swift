@@ -502,16 +502,117 @@ public final class ProjectStore: Sendable {
 
     public func fetchModuleAnalysis(sessionID: UUID, modulePath: String) throws -> ModuleAnalysis? {
         try db.read { db in
-            try ModuleAnalysis
-                .filter(Column("session_id") == sessionID)
-                .filter(Column("module_path") == modulePath)
-                .fetchOne(db)
+            try loadModuleAnalysis(db, sessionID: sessionID, modulePath: modulePath)
         }
     }
 
     public func save(_ analysis: ModuleAnalysis) throws {
         try db.write { db in
-            try analysis.save(db)
+            try writeModuleAnalysis(db, analysis: analysis)
+        }
+    }
+
+    public func enclosingFunction(sessionID: UUID, modulePath: String, offset: UInt64) throws -> (functionOffset: UInt64, name: String?)? {
+        let key = Int64(bitPattern: offset)
+        return try db.read { db in
+            guard let block = try ModuleAnalysisBlockRow
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("module_path") == modulePath)
+                .filter(Column("offset") <= key)
+                .filter(Column("offset") + Column("size") > key)
+                .fetchOne(db)
+            else { return nil }
+
+            let function = try ModuleAnalysisFunctionRow
+                .filter(Column("session_id") == sessionID)
+                .filter(Column("module_path") == modulePath)
+                .filter(Column("offset") == block.functionOffset)
+                .fetchOne(db)
+
+            return (UInt64(bitPattern: block.functionOffset), function?.name)
+        }
+    }
+
+    private func loadModuleAnalysis(_ db: Database, sessionID: UUID, modulePath: String) throws -> ModuleAnalysis? {
+        guard let header = try ModuleAnalysisRow
+            .filter(Column("session_id") == sessionID)
+            .filter(Column("module_path") == modulePath)
+            .fetchOne(db)
+        else { return nil }
+
+        let mappedRanges = (try? JSONDecoder().decode([ProcessNode.ModuleRange].self, from: header.mappedRanges)) ?? []
+
+        let functionRows = try ModuleAnalysisFunctionRow
+            .filter(Column("session_id") == sessionID)
+            .filter(Column("module_path") == modulePath)
+            .order(Column("offset"))
+            .fetchAll(db)
+        let blockRows = try ModuleAnalysisBlockRow
+            .filter(Column("session_id") == sessionID)
+            .filter(Column("module_path") == modulePath)
+            .order(Column("function_offset"), Column("offset"))
+            .fetchAll(db)
+
+        var blocksByFunction: [Int64: [ModuleAnalysis.Function.Block]] = [:]
+        for row in blockRows {
+            blocksByFunction[row.functionOffset, default: []].append(
+                .init(offset: UInt64(bitPattern: row.offset), size: UInt64(bitPattern: row.size))
+            )
+        }
+
+        let functions: [ModuleAnalysis.Function] = functionRows.map { row in
+            ModuleAnalysis.Function(
+                offset: UInt64(bitPattern: row.offset),
+                name: row.name,
+                source: ModuleAnalysis.Function.Source(rawValue: row.source) ?? .symbol,
+                blocks: blocksByFunction[row.offset] ?? []
+            )
+        }
+
+        return ModuleAnalysis(
+            sessionID: sessionID,
+            modulePath: modulePath,
+            moduleUUID: header.moduleUUID,
+            mappedRanges: mappedRanges,
+            functions: functions,
+            analyzedAt: header.analyzedAt
+        )
+    }
+
+    private func writeModuleAnalysis(_ db: Database, analysis: ModuleAnalysis) throws {
+        let header = ModuleAnalysisRow(
+            sessionID: analysis.sessionID,
+            modulePath: analysis.modulePath,
+            moduleUUID: analysis.moduleUUID,
+            mappedRanges: try JSONEncoder().encode(analysis.mappedRanges),
+            analyzedAt: analysis.analyzedAt
+        )
+        try header.save(db)
+
+        try ModuleAnalysisFunctionRow
+            .filter(Column("session_id") == analysis.sessionID)
+            .filter(Column("module_path") == analysis.modulePath)
+            .deleteAll(db)
+
+        for function in analysis.functions {
+            let functionOffset = Int64(bitPattern: function.offset)
+            try ModuleAnalysisFunctionRow(
+                sessionID: analysis.sessionID,
+                modulePath: analysis.modulePath,
+                offset: functionOffset,
+                name: function.name,
+                source: function.source.rawValue
+            ).insert(db)
+
+            for block in function.blocks {
+                try ModuleAnalysisBlockRow(
+                    sessionID: analysis.sessionID,
+                    modulePath: analysis.modulePath,
+                    functionOffset: functionOffset,
+                    offset: Int64(bitPattern: block.offset),
+                    size: Int64(bitPattern: block.size)
+                ).insert(db)
+            }
         }
     }
 
@@ -578,7 +679,7 @@ public final class ProjectStore: Sendable {
 
     public func deleteModuleAnalysis(sessionID: UUID, modulePath: String) throws {
         try db.write { db in
-            _ = try ModuleAnalysis
+            _ = try ModuleAnalysisRow
                 .filter(Column("session_id") == sessionID)
                 .filter(Column("module_path") == modulePath)
                 .deleteAll(db)
@@ -1392,10 +1493,46 @@ public final class ProjectStore: Sendable {
             t.column("module_path", .text).notNull()
             t.column("module_uuid", .text)
             t.column("mapped_ranges", .blob).notNull()
-            t.column("functions", .blob).notNull()
             t.column("analyzed_at", .datetime).notNull()
             t.primaryKey(["session_id", "module_path"])
         }
+
+        try db.create(table: "module_analysis_function", ifNotExists: true) { t in
+            t.column("session_id", .text).notNull()
+            t.column("module_path", .text).notNull()
+            t.column("offset", .integer).notNull()
+            t.column("name", .text)
+            t.column("source", .text).notNull()
+            t.primaryKey(["session_id", "module_path", "offset"])
+            t.foreignKey(
+                ["session_id", "module_path"],
+                references: "module_analysis",
+                columns: ["session_id", "module_path"],
+                onDelete: .cascade
+            )
+        }
+
+        try db.create(table: "module_analysis_block", ifNotExists: true) { t in
+            t.column("session_id", .text).notNull()
+            t.column("module_path", .text).notNull()
+            t.column("function_offset", .integer).notNull()
+            t.column("offset", .integer).notNull()
+            t.column("size", .integer).notNull()
+            t.primaryKey(["session_id", "module_path", "function_offset", "offset"])
+            t.foreignKey(
+                ["session_id", "module_path", "function_offset"],
+                references: "module_analysis_function",
+                columns: ["session_id", "module_path", "offset"],
+                onDelete: .cascade
+            )
+        }
+
+        try db.create(
+            index: "idx_module_analysis_block_lookup",
+            on: "module_analysis_block",
+            columns: ["session_id", "module_path", "offset"],
+            ifNotExists: true
+        )
 
         try db.create(table: "remote_device_config", ifNotExists: true) { t in
             t.primaryKey("id", .text).notNull()

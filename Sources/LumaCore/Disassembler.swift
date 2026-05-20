@@ -176,9 +176,12 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
             canReuse(existing, currentIdentity: identity),
             !existing.functions.isEmpty
         {
-            analyzedModules.insert(module.path)
-            await replayAnalysis(existing, module: module)
-            return
+            let blocksMissing = existing.functions.allSatisfy { $0.blocks.isEmpty }
+            if !(blocksMissing && introspector.isAvailable) {
+                analyzedModules.insert(module.path)
+                await replayAnalysis(existing, module: module)
+                return
+            }
         }
 
         guard introspector.isAvailable else { return }
@@ -198,6 +201,7 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         var functions = await registerKnownFunctions(bundle: bundle, module: module)
         await runBoundedPreludeScan(ranges: ranges, module: module)
         await harvestPreludeFunctions(module: module, into: &functions)
+        await harvestBasicBlocks(module: module, into: &functions)
 
         let analysis = ModuleAnalysis(
             sessionID: sessionID,
@@ -279,11 +283,26 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         let hi = module.base &+ module.size
         var seen = Set(functions.map(\.offset))
         for entry in entries {
-            guard entry.offset >= lo, entry.offset < hi else { continue }
-            let offset = entry.offset &- lo
+            let absolute = entry.offset.value
+            guard absolute >= lo, absolute < hi else { continue }
+            let offset = absolute &- lo
             if seen.contains(offset) { continue }
             seen.insert(offset)
             functions.append(.init(offset: offset, name: nil, source: .prelude))
+        }
+    }
+
+    private func harvestBasicBlocks(module: ProcessModule, into functions: inout [ModuleAnalysis.Function]) async {
+        for index in functions.indices {
+            let entry = module.base &+ functions[index].offset
+            let raw = await r2.cmd("afbj @ 0x\(String(entry, radix: 16))")
+            guard let entries = try? JSONDecoder().decode([R2BasicBlockEntry].self, from: Data(raw.utf8)) else { continue }
+            functions[index].blocks = entries
+                .compactMap { block -> ModuleAnalysis.Function.Block? in
+                    guard block.addr.value >= module.base else { return nil }
+                    return .init(offset: block.addr.value &- module.base, size: block.size.value)
+                }
+                .sorted { $0.offset < $1.offset }
         }
     }
 
@@ -590,8 +609,30 @@ private struct FridaMemURI {
     }
 }
 
+private struct R2Hex: Decodable {
+    let value: UInt64
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let text = try? container.decode(String.self) {
+            let trimmed = text.hasPrefix("0x") ? String(text.dropFirst(2)) : text
+            guard let parsed = UInt64(trimmed, radix: 16) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "invalid hex: \(text)")
+            }
+            value = parsed
+            return
+        }
+        value = try container.decode(UInt64.self)
+    }
+}
+
 private struct R2FunctionEntry: Decodable {
-    let offset: UInt64
+    let offset: R2Hex
+}
+
+private struct R2BasicBlockEntry: Decodable {
+    let addr: R2Hex
+    let size: R2Hex
 }
 
 private struct R2DisasmOp: Decodable {
