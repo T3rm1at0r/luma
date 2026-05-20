@@ -16,7 +16,6 @@ final class MissionDetailPane {
 
     private let header: MissionHeaderBar
     private let transcript: MissionTranscriptView
-    private let actionQueue: MissionActionQueueView
     private let findings: MissionFindingsView
     private let inputBar: MissionInputBar
 
@@ -48,11 +47,6 @@ final class MissionDetailPane {
             }
         )
         transcript = MissionTranscriptView()
-        actionQueue = MissionActionQueueView(
-            engine: engine,
-            parentWindow: parentWindow,
-            missionID: mission.id
-        )
         findings = MissionFindingsView(
             engine: engine,
             missionID: mission.id,
@@ -83,18 +77,7 @@ final class MissionDetailPane {
         split.shrinkStartChild = false
         split.shrinkEndChild = false
         split.startChild = WidgetRef(transcript.widget)
-
-        let rightSide = Paned(orientation: .vertical)
-        rightSide.hexpand = true
-        rightSide.vexpand = true
-        rightSide.resizeStartChild = true
-        rightSide.resizeEndChild = true
-        rightSide.shrinkStartChild = false
-        rightSide.shrinkEndChild = false
-        rightSide.startChild = WidgetRef(actionQueue.widget)
-        rightSide.endChild = WidgetRef(findings.widget)
-        rightSide.position = 360
-        split.endChild = WidgetRef(rightSide)
+        split.endChild = WidgetRef(findings.widget)
 
         widget.append(child: split)
         widget.append(child: Separator(orientation: .horizontal))
@@ -117,7 +100,6 @@ final class MissionDetailPane {
         lastTurnCount = initialTurns.count
         lastActionsCache = initialActions
         transcript.applyTurns(initialTurns, actions: initialActions)
-        actionQueue.update(actions: initialActions.filter { $0.status == .pending })
         findings.update(findings: initialFindings)
 
         observations.append(
@@ -138,7 +120,6 @@ final class MissionDetailPane {
                     guard let self else { return }
                     self.lastActionsCache = rows
                     self.transcript.applyActions(rows)
-                    self.actionQueue.update(actions: rows.filter { $0.status == .pending })
                 }
             })
         observations.append(

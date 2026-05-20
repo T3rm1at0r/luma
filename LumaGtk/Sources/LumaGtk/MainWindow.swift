@@ -86,6 +86,7 @@ final class MainWindow: InstrumentUIHost {
     private var resumeProcessButton: Button!
     private var installPackageButton: Button!
     private var collaborationButton: Button!
+    private var actionQueuePopover: GlobalActionQueuePopover!
     private var collaborationPanel: CollaborationPanel?
     private let outerPaned: Paned
     private var splitView: Adw.NavigationSplitView!
@@ -194,6 +195,10 @@ final class MainWindow: InstrumentUIHost {
         collaborationButton.tooltipText = "Collaboration"
         header.packEnd(child: collaborationButton)
         self.collaborationButton = collaborationButton
+
+        let actionQueuePopover = GlobalActionQueuePopover(parentWindow: window)
+        header.packEnd(child: actionQueuePopover.button)
+        self.actionQueuePopover = actionQueuePopover
 
         let installPackageButton = Button()
         installPackageButton.set(iconName: "folder-download-symbolic")
@@ -430,6 +435,8 @@ final class MainWindow: InstrumentUIHost {
 
     func attach(engine: Engine) {
         self.engine = engine
+        actionQueuePopover.attach(engine: engine)
+
         eventStreamPane.setInitialCollapsed(engine.projectUIState.isEventStreamCollapsed)
         applyEventStreamLayout()
         engine.onSessionListChanged = { [weak self] change in self?.handleSessionListChange(change) }

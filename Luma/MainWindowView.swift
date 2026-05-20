@@ -483,6 +483,8 @@ struct ProjectToolbar: ToolbarContent {
                 .padding()
             }
 
+            GlobalActionQueueToolbarItem(engine: engine)
+
             Button {
                 engine.setCollaborationPanelVisible(!engine.projectUIState.isCollaborationPanelVisible)
             } label: {

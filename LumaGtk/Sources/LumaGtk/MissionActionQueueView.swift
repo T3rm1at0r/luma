@@ -9,7 +9,6 @@ final class MissionActionQueueView {
 
     private weak var engine: Engine?
     private let parentWindow: Gtk.Window
-    private let missionID: UUID
     private let countLabel: Label
     private let listScroll: ScrolledWindow
     private let listBox: Box
@@ -19,10 +18,9 @@ final class MissionActionQueueView {
     private var cardsByActionID: [UUID: ActionCard] = [:]
     private var inputCardsByActionID: [UUID: RequestUserInputCard] = [:]
 
-    init(engine: Engine?, parentWindow: Gtk.Window, missionID: UUID) {
+    init(engine: Engine?, parentWindow: Gtk.Window) {
         self.engine = engine
         self.parentWindow = parentWindow
-        self.missionID = missionID
 
         widget = Box(orientation: .vertical, spacing: 0)
         widget.hexpand = true
@@ -205,6 +203,8 @@ private final class ActionCard {
     private let timeLabel: Label
     private let argsLabel: Label
     private let argsContainer: Box
+    private let codeHost: Box
+    private var codeEditor: MonacoEditor?
     private let rationaleLabel: Label
     private let approveButton: Button
     private let rejectButton: Button
@@ -246,6 +246,11 @@ private final class ActionCard {
         timeLabel.add(cssClass: "caption")
         header.append(child: timeLabel)
         inner.append(child: header)
+
+        codeHost = Box(orientation: .vertical, spacing: 0)
+        codeHost.setSizeRequest(width: -1, height: 200)
+        codeHost.visible = false
+        inner.append(child: codeHost)
 
         argsContainer = Box(orientation: .vertical, spacing: 0)
         argsLabel = Label(str: "")
@@ -294,18 +299,42 @@ private final class ActionCard {
     func update(action: MissionAction) {
         toolNameLabel.label = action.toolName
         timeLabel.label = RelativeTime.string(from: action.requestedAt)
-        if !action.argsJSON.isEmpty, action.argsJSON != "{}" {
-            argsLabel.label = prettyJSON(action.argsJSON)
+
+        let parsed = parsedArgs(action.argsJSON)
+        applyCodeAttachment(toolName: action.toolName, args: parsed)
+
+        let remaining = jsonWithoutCodeField(toolName: action.toolName, args: parsed)
+        if let remaining {
+            argsLabel.label = remaining
             argsContainer.visible = true
         } else {
             argsContainer.visible = false
         }
+
         if let rationale = action.rationale, !rationale.isEmpty {
             rationaleLabel.label = rationale
             rationaleLabel.visible = true
         } else {
             rationaleLabel.visible = false
         }
+    }
+
+    private func applyCodeAttachment(toolName: String, args: [String: Any]) {
+        guard let attachment = codeAttachment(toolName: toolName, args: args) else {
+            codeEditor = nil
+            removeAllChildren(of: codeHost)
+            codeHost.visible = false
+            return
+        }
+        if let editor = codeEditor {
+            editor.setProfile(attachment.profile)
+            editor.setText(attachment.source)
+        } else {
+            let editor = MonacoEditor(profile: attachment.profile, initialText: attachment.source)
+            editor.installInto(codeHost)
+            codeEditor = editor
+        }
+        codeHost.visible = true
     }
 }
 
@@ -418,20 +447,57 @@ private final class RequestUserInputCard {
     }
 
     private func parseArgs(_ json: String) -> [String: Any] {
-        guard let data = json.data(using: .utf8) else { return [:] }
-        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]) ?? [:]
+        parsedArgs(json)
     }
 }
 
-private func prettyJSON(_ raw: String) -> String {
-    guard let data = raw.data(using: .utf8),
-        let obj = try? JSONSerialization.jsonObject(with: data),
-        let pretty = try? JSONSerialization.data(
-            withJSONObject: obj,
-            options: [.prettyPrinted, .sortedKeys]
-        ),
-        let str = String(data: pretty, encoding: .utf8)
-    else { return raw }
+private struct CodeAttachment {
+    let source: String
+    let profile: EditorProfile
+}
+
+private func codeAttachment(toolName: String, args: [String: Any]) -> CodeAttachment? {
+    switch toolName {
+    case "eval_repl":
+        return (args["code"] as? String).map { CodeAttachment(source: $0, profile: .fridaCodeShare()) }
+    case "install_tracer_hook", "update_tracer_hook":
+        return (args["code"] as? String).map { CodeAttachment(source: $0, profile: .fridaTracerHook(packages: [])) }
+    case "write_custom_instrument_file", "create_custom_instrument_file", "update_custom_instrument_file":
+        return (args["contents"] as? String).map { CodeAttachment(source: $0, profile: .fridaTracerHook(packages: [])) }
+    default:
+        return nil
+    }
+}
+
+private func jsonWithoutCodeField(toolName: String, args: [String: Any]) -> String? {
+    var stripped = args
+    switch toolName {
+    case "eval_repl", "install_tracer_hook", "update_tracer_hook":
+        stripped.removeValue(forKey: "code")
+    case "write_custom_instrument_file", "create_custom_instrument_file", "update_custom_instrument_file":
+        stripped.removeValue(forKey: "contents")
+    default:
+        break
+    }
+    if stripped.isEmpty { return nil }
+    guard let data = try? JSONSerialization.data(withJSONObject: stripped, options: [.prettyPrinted, .sortedKeys]),
+        let str = String(data: data, encoding: .utf8)
+    else { return nil }
     return str
+}
+
+private func parsedArgs(_ json: String) -> [String: Any] {
+    guard let data = json.data(using: .utf8),
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return [:] }
+    return obj
+}
+
+private func removeAllChildren(of box: Box) {
+    var child = box.firstChild
+    while let cur = child {
+        child = cur.nextSibling
+        box.remove(child: cur)
+    }
 }
 

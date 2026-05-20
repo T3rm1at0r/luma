@@ -22,7 +22,6 @@ struct MissionView: View {
 
     enum CompactPane: String, CaseIterable, Identifiable {
         case transcript = "Transcript"
-        case actions = "Actions"
         case findings = "Findings"
         var id: Self { self }
     }
@@ -40,13 +39,8 @@ struct MissionView: View {
                         MissionTranscriptView(turns: turns, actions: actions, liveText: liveText)
                             .frame(idealWidth: 480)
 
-                        VStack(alignment: .leading, spacing: 0) {
-                            ActionQueueView(engine: engine, missionID: mission.id, actions: pendingActions)
-                                .frame(maxHeight: 360)
-                            Divider()
-                            FindingsListView(engine: engine, missionID: mission.id, findings: findings)
-                        }
-                        .frame(idealWidth: 280)
+                        FindingsListView(engine: engine, missionID: mission.id, findings: findings)
+                            .frame(idealWidth: 280)
                     }
                 }
 
@@ -80,8 +74,6 @@ struct MissionView: View {
         switch compactPane {
         case .transcript:
             MissionTranscriptView(turns: turns, actions: actions, liveText: liveText)
-        case .actions:
-            ActionQueueView(engine: engine, missionID: mission.id, actions: pendingActions)
         case .findings:
             FindingsListView(engine: engine, missionID: mission.id, findings: findings)
         }
@@ -89,10 +81,6 @@ struct MissionView: View {
 
     private var mission: Mission? {
         engine.missions.first(where: { $0.id == missionID })
-    }
-
-    private var pendingActions: [MissionAction] {
-        actions.filter { $0.status == .pending }
     }
 
     private func startObservations() {

@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ActionQueueView: View {
     let engine: Engine
-    let missionID: UUID
     let actions: [MissionAction]
 
     @State private var rejectingAction: MissionAction?
@@ -42,6 +41,7 @@ struct ActionQueueView: View {
                                 }
                             } else {
                                 ActionCard(
+                                    engine: engine,
                                     action: action,
                                     onApprove: { Task { await engine.approveMissionAction(actionID: action.id) } },
                                     onReject: {
@@ -80,11 +80,16 @@ struct ActionQueueView: View {
 }
 
 private struct ActionCard: View {
+    let engine: Engine
     let action: MissionAction
     var onApprove: () -> Void
     var onReject: () -> Void
 
     var body: some View {
+        let parsed = parsedArgs(action.argsJSON)
+        let codeView = codeArgView(toolName: action.toolName, args: parsed, engine: engine)
+        let remainingJSON = jsonWithoutCodeField(toolName: action.toolName, args: parsed)
+
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "wrench.adjustable.fill").foregroundStyle(.tint)
@@ -93,8 +98,10 @@ private struct ActionCard: View {
                 Text(action.requestedAt, style: .relative).font(.caption).foregroundStyle(.secondary)
             }
 
-            if !action.argsJSON.isEmpty, action.argsJSON != "{}" {
-                Text(prettyJSON(action.argsJSON))
+            codeView
+
+            if let remainingJSON {
+                Text(remainingJSON)
                     .font(.caption.monospaced())
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,6 +122,81 @@ private struct ActionCard: View {
         .padding()
         .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
+}
+
+@ViewBuilder
+private func codeArgView(toolName: String, args: [String: Any], engine: Engine) -> some View {
+    if let attachment = codeAttachment(toolName: toolName, args: args) {
+        ReadOnlyCodeView(source: attachment.source, profile: attachment.profile, engine: engine)
+            .frame(height: 180)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+}
+
+private struct ReadOnlyCodeView: View {
+    let source: String
+    let profile: EditorProfile
+    let engine: Engine
+
+    @State private var text: String
+
+    init(source: String, profile: EditorProfile, engine: Engine) {
+        self.source = source
+        var readOnlyProfile = profile
+        readOnlyProfile.readOnly = true
+        self.profile = readOnlyProfile
+        self.engine = engine
+        _text = State(initialValue: source)
+    }
+
+    var body: some View {
+        CodeEditorView(text: $text, profile: profile, engine: engine)
+            .onChange(of: source) { _, newValue in
+                text = newValue
+            }
+    }
+}
+
+private struct CodeAttachment {
+    let source: String
+    let profile: EditorProfile
+}
+
+private func codeAttachment(toolName: String, args: [String: Any]) -> CodeAttachment? {
+    switch toolName {
+    case "eval_repl":
+        return (args["code"] as? String).map { CodeAttachment(source: $0, profile: .fridaCodeShare()) }
+    case "install_tracer_hook", "update_tracer_hook":
+        return (args["code"] as? String).map { CodeAttachment(source: $0, profile: .fridaTracerHook(packages: [])) }
+    case "write_custom_instrument_file", "create_custom_instrument_file", "update_custom_instrument_file":
+        return (args["contents"] as? String).map { CodeAttachment(source: $0, profile: .fridaTracerHook(packages: [])) }
+    default:
+        return nil
+    }
+}
+
+private func jsonWithoutCodeField(toolName: String, args: [String: Any]) -> String? {
+    var stripped = args
+    switch toolName {
+    case "eval_repl", "install_tracer_hook", "update_tracer_hook":
+        stripped.removeValue(forKey: "code")
+    case "write_custom_instrument_file", "create_custom_instrument_file", "update_custom_instrument_file":
+        stripped.removeValue(forKey: "contents")
+    default:
+        break
+    }
+    if stripped.isEmpty { return nil }
+    guard let data = try? JSONSerialization.data(withJSONObject: stripped, options: [.prettyPrinted, .sortedKeys]),
+        let str = String(data: data, encoding: .utf8)
+    else { return nil }
+    return str
+}
+
+private func parsedArgs(_ json: String) -> [String: Any] {
+    guard let data = json.data(using: .utf8),
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return [:] }
+    return obj
 }
 
 private struct RequestUserInputCard: View {
@@ -171,11 +253,3 @@ private struct RequestUserInputCard: View {
     }
 }
 
-private func prettyJSON(_ s: String) -> String {
-    guard let data = s.data(using: .utf8),
-        let obj = try? JSONSerialization.jsonObject(with: data),
-        let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
-        let str = String(data: pretty, encoding: .utf8)
-    else { return s }
-    return str
-}

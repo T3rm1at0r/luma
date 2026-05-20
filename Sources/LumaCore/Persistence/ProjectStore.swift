@@ -825,6 +825,30 @@ public final class ProjectStore: Sendable {
         )
     }
 
+    public func fetchAllPendingMissionActions() throws -> [MissionAction] {
+        try db.read { db in
+            try MissionAction
+                .filter(Column("status") == MissionActionStatus.pending.rawValue)
+                .order(Column("requested_at").asc)
+                .fetchAll(db)
+        }
+    }
+
+    public func observeAllPendingMissionActions(
+        onChange: @escaping @Sendable ([MissionAction]) -> Void
+    ) -> StoreObservation {
+        StoreObservation(
+            ValueObservation
+                .tracking { db in
+                    try MissionAction
+                        .filter(Column("status") == MissionActionStatus.pending.rawValue)
+                        .order(Column("requested_at").asc)
+                        .fetchAll(db)
+                }
+                .start(in: db, scheduling: .async(onQueue: .main), onError: { _ in }, onChange: onChange)
+        )
+    }
+
     public func observeMissionFindings(
         missionID: UUID,
         onChange: @escaping @Sendable ([MissionFinding]) -> Void
