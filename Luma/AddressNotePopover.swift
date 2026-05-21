@@ -267,11 +267,15 @@ struct AddressNotePopover: View {
                     .disabled(isSending || draft.isEmpty)
                     Spacer(minLength: 0)
                     Button {
-                        askAI(note: note)
+                        if isSending {
+                            cancelReply()
+                        } else {
+                            askAI(note: note)
+                        }
                     } label: {
                         Group {
                             if isSending {
-                                ProgressView().controlSize(.small)
+                                Image(systemName: "stop.fill")
                             } else {
                                 Image(systemName: "paperplane.fill")
                             }
@@ -279,8 +283,8 @@ struct AddressNotePopover: View {
                         .frame(width: 18, height: 18)
                     }
                     .buttonStyle(.borderedProminent)
-                    .help("Ask AI")
-                    .disabled(isSending || draft.isEmpty)
+                    .help(isSending ? "Cancel reply" : "Ask AI")
+                    .disabled(!isSending && draft.isEmpty)
                 }
                 .frame(height: 64)
             }
@@ -376,6 +380,12 @@ struct AddressNotePopover: View {
         messages.append(message)
         unusedTransientNoteIDs.remove(note.id)
         draft = ""
+    }
+
+    private func cancelReply() {
+        Task { @MainActor in
+            await engine.cancelAddressNoteReply(sessionID: sessionID)
+        }
     }
 
     private func askAI(note: AddressNote) {

@@ -32,6 +32,7 @@ final class AddressNotePopover {
     private var askButton: Button?
     private var askSpinner: Adw.Spinner?
     private var askIcon: Gtk.Image?
+    private var cancelIcon: Gtk.Image?
     private var streamingRow: Widget?
     private var streamingBody: Label?
     private var streamingText: String = ""
@@ -123,6 +124,8 @@ final class AddressNotePopover {
         saveButton = nil
         askButton = nil
         askSpinner = nil
+        askIcon = nil
+        cancelIcon = nil
         errorLabel = nil
         headerTitleLabel = nil
         switchButton = nil
@@ -577,17 +580,22 @@ final class AddressNotePopover {
         let askBtn = Button()
         let askIcon = Gtk.Image(iconName: "mail-send-symbolic")
         askIcon.pixelSize = 14
+        let cancelIcon = Gtk.Image(iconName: "media-playback-stop-symbolic")
+        cancelIcon.pixelSize = 14
+        cancelIcon.visible = false
         let spinner = Adw.Spinner()
         spinner.visible = false
         let askContent = Box(orientation: .horizontal, spacing: 0)
         askContent.append(child: askIcon)
+        askContent.append(child: cancelIcon)
         askContent.append(child: spinner)
         askBtn.set(child: askContent)
         self.askIcon = askIcon
+        self.cancelIcon = cancelIcon
         askBtn.add(cssClass: "suggested-action")
         askBtn.tooltipText = "Ask AI"
         askBtn.onClicked { [weak self] _ in
-            MainActor.assumeIsolated { self?.askAI() }
+            MainActor.assumeIsolated { self?.handleAskButtonClick() }
         }
         askButton = askBtn
         askSpinner = spinner
@@ -607,9 +615,11 @@ final class AddressNotePopover {
         default: isSending = false
         }
         saveButton?.sensitive = !isSending
-        askButton?.sensitive = !isSending
+        askButton?.sensitive = true
+        askButton?.tooltipText = isSending ? "Cancel reply" : "Ask AI"
         askSpinner?.visible = isSending
         askIcon?.visible = !isSending
+        cancelIcon?.visible = isSending
         if case .error(let reason) = pending {
             errorLabel?.label = reason
             errorLabel?.visible = true
@@ -823,6 +833,21 @@ final class AddressNotePopover {
         appendMessageRow(message)
         unusedTransientNoteIDs.remove(id)
         clearDraft()
+    }
+
+    private func handleAskButtonClick() {
+        if case .sending = pending {
+            cancelReply()
+        } else {
+            askAI()
+        }
+    }
+
+    private func cancelReply() {
+        guard let engine else { return }
+        Task { @MainActor in
+            await engine.cancelAddressNoteReply(sessionID: sessionID)
+        }
     }
 
     private func askAI() {
