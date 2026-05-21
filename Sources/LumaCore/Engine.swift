@@ -34,6 +34,7 @@ public final class Engine {
 
     #if canImport(Network) || canImport(CSoup)
     private var activeMCPServersByMissionID: [UUID: MCPServer] = [:]
+    private var activeNoteReplyTasks: [UUID: Task<AddressNoteMessage?, Never>] = [:]
 
     public private(set) var externalMCPServer: MCPServer?
     public private(set) var externalMCPURL: URL?
@@ -406,6 +407,25 @@ public final class Engine {
         modelID: String,
         onDelta: (@MainActor (String) -> Void)? = nil
     ) async -> AddressNoteMessage? {
+        guard let sessionID = (try? store.fetchAddressNote(id: noteID))?.sessionID else { return nil }
+        activeNoteReplyTasks[sessionID]?.cancel()
+        let task = Task<AddressNoteMessage?, Never> { @MainActor [weak self] in
+            await self?.runNoteReply(noteID: noteID, providerID: providerID, modelID: modelID, onDelta: onDelta) ?? nil
+        }
+        activeNoteReplyTasks[sessionID] = task
+        let reply = await task.value
+        if activeNoteReplyTasks[sessionID] == task {
+            activeNoteReplyTasks.removeValue(forKey: sessionID)
+        }
+        return reply
+    }
+
+    private func runNoteReply(
+        noteID: UUID,
+        providerID: String,
+        modelID: String,
+        onDelta: (@MainActor (String) -> Void)?
+    ) async -> AddressNoteMessage? {
         guard let note = try? store.fetchAddressNote(id: noteID),
             let provider = llmRegistry.provider(id: providerID)
         else { return nil }
@@ -421,7 +441,7 @@ public final class Engine {
         guard let mission else { return nil }
 
         let system = await buildAddressNoteSystemPrompt(note: note)
-        let messages = thread.map { msg -> LLMMessage in
+        var messages = thread.map { msg -> LLMMessage in
             let role: LLMRole = (msg.role == .assistant) ? .assistant : .user
             return LLMMessage(role: role, blocks: [.text(msg.bodyMarkdown)])
         }
@@ -461,41 +481,58 @@ public final class Engine {
             return nil
         }
 
-        let request = LLMTurnRequest(
-            modelID: modelID,
-            systemBlocks: [LLMContentBlock(content: .text(system), cacheBoundary: true)],
-            messages: messages,
-            tools: [],
-            maxOutputTokens: 1024,
-            thinkingBudget: 0,
-            temperature: 0.3
-        )
-
+        let tools = noteTurnToolSpecs()
         let baseURL = LumaAppState.shared.providerBaseURL(providerID: providerID).flatMap(URL.init(string:))
         var responseText = ""
         var usage = LLMUsage.zero
+        var iterationsRemaining = Self.noteTurnMaxIterations
         do {
-            for try await event in provider.streamTurn(request, apiKey: apiKey, baseURL: baseURL) {
-                switch event {
-                case .textDelta(let delta):
-                    responseText += delta
-                    onDelta?(delta)
-                case .finalMessage(_, let blocks):
-                    if responseText.isEmpty {
-                        for block in blocks {
-                            if case .text(let t) = block.content { responseText += t }
-                        }
-                        if !responseText.isEmpty { onDelta?(responseText) }
-                    }
-                case .usage(let u):
-                    usage = u
-                default:
-                    break
+            iterationLoop: while iterationsRemaining > 0 {
+                iterationsRemaining -= 1
+                if Task.isCancelled { throw CancellationError() }
+                let request = LLMTurnRequest(
+                    modelID: modelID,
+                    systemBlocks: [LLMContentBlock(content: .text(system), cacheBoundary: true)],
+                    messages: messages,
+                    tools: tools,
+                    maxOutputTokens: 1024,
+                    thinkingBudget: 0,
+                    temperature: 0.3,
+                    mission: mission
+                )
+
+                let outcome = await streamNoteTurn(
+                    provider: provider,
+                    request: request,
+                    apiKey: apiKey,
+                    baseURL: baseURL,
+                    onDelta: onDelta
+                )
+                responseText += outcome.text
+                usage.inputTokens += outcome.usage.inputTokens
+                usage.outputTokens += outcome.usage.outputTokens
+                usage.cacheReadTokens += outcome.usage.cacheReadTokens
+                usage.cacheCreateTokens += outcome.usage.cacheCreateTokens
+
+                if let error = outcome.error { throw error }
+
+                let toolUses = outcome.blocks.filter {
+                    if case .toolUse = $0.content { return true }
+                    return false
                 }
+                if toolUses.isEmpty { break iterationLoop }
+
+                messages.append(LLMMessage(role: .assistant, blocks: outcome.blocks))
+                let resultBlocks = await runNoteToolUses(
+                    toolUses,
+                    sessionID: note.sessionID,
+                    mission: mission
+                )
+                messages.append(LLMMessage(role: .user, blocks: resultBlocks))
             }
         } catch {
             action.status = .failed
-            action.error = error.localizedDescription
+            action.error = (error is CancellationError) ? "Reply cancelled by user." : error.localizedDescription
             action.completedAt = Date()
             try? store.save(action)
             collaboration.enqueueMissionAction(action)
@@ -575,15 +612,195 @@ public final class Engine {
         return mission
     }
 
+    private static let noteTurnMaxIterations = 6
+
+    private func noteTurnToolSpecs() -> [LLMToolSpec] {
+        missionExecutor.catalog.toolSpecs()
+    }
+
+    private struct NoteTurnOutcome {
+        var blocks: [LLMContentBlock]
+        var text: String
+        var usage: LLMUsage
+        var error: (any Swift.Error)?
+    }
+
+    private func streamNoteTurn(
+        provider: any LLMProvider,
+        request: LLMTurnRequest,
+        apiKey: String?,
+        baseURL: URL?,
+        onDelta: (@MainActor (String) -> Void)?
+    ) async -> NoteTurnOutcome {
+        var blocks: [LLMContentBlock] = []
+        var streamedText = ""
+        var usage = LLMUsage.zero
+        var capturedError: (any Swift.Error)?
+
+        do {
+            for try await event in provider.streamTurn(request, apiKey: apiKey, baseURL: baseURL) {
+                switch event {
+                case .textDelta(let delta):
+                    streamedText += delta
+                    onDelta?(delta)
+                case .finalMessage(_, let finalBlocks):
+                    blocks = finalBlocks
+                case .usage(let u):
+                    usage = u
+                default:
+                    break
+                }
+            }
+        } catch {
+            capturedError = error
+        }
+
+        if blocks.isEmpty, !streamedText.isEmpty {
+            blocks = [LLMContentBlock(content: .text(streamedText))]
+        }
+
+        let finalText = blocks.compactMap { block -> String? in
+            if case .text(let t) = block.content { return t }
+            return nil
+        }.joined()
+        let textForLoop = finalText.isEmpty ? streamedText : finalText
+
+        return NoteTurnOutcome(blocks: blocks, text: textForLoop, usage: usage, error: capturedError)
+    }
+
+    private func runNoteToolUses(
+        _ blocks: [LLMContentBlock],
+        sessionID: UUID,
+        mission: Mission
+    ) async -> [LLMContentBlock] {
+        var results: [LLMContentBlock] = []
+        for block in blocks {
+            guard case .toolUse(let id, let name, let inputJSON) = block.content else { continue }
+            let (json, isError) = await runNoteToolUse(
+                name: name,
+                inputJSON: inputJSON,
+                toolCallID: id,
+                sessionID: sessionID,
+                mission: mission
+            )
+            results.append(LLMContentBlock(content: .toolResult(
+                toolUseID: id,
+                contentJSON: json,
+                isError: isError
+            )))
+        }
+        return results
+    }
+
+    private func runNoteToolUse(
+        name: String,
+        inputJSON: String,
+        toolCallID: String,
+        sessionID: UUID,
+        mission: Mission
+    ) async -> (json: String, isError: Bool) {
+        let args = (try? JSONSerialization.jsonObject(with: Data(inputJSON.utf8))) as? [String: Any] ?? [:]
+        let spec = missionExecutor.catalog.spec(named: name)
+
+        if spec?.isObserve == true {
+            let invocation = ActionInvocation(args: args, mission: mission, sessionID: sessionID, toolCallID: toolCallID)
+            do {
+                let result = try await missionExecutor.catalog.execute(name, invocation: invocation)
+                return (result.resultJSON, result.isError)
+            } catch {
+                return (#"{"error": "\#(error.localizedDescription)"}"#, true)
+            }
+        }
+
+        let action = MissionAction(
+            missionID: mission.id,
+            turnID: nil,
+            toolName: name,
+            argsJSON: inputJSON,
+            isObserve: false,
+            sessionID: sessionID,
+            toolCallID: toolCallID
+        )
+        try? store.save(action)
+        collaboration.enqueueMissionAction(action)
+
+        let completed = await awaitActionTerminalStatus(actionID: action.id, missionID: mission.id)
+        return noteToolResultPayload(for: completed)
+    }
+
+    private func awaitActionTerminalStatus(actionID: UUID, missionID: UUID) async -> MissionAction {
+        if let cached = try? store.fetchMissionAction(id: actionID), isTerminal(cached.status) {
+            return cached
+        }
+        let (stream, continuation) = AsyncStream.makeStream(of: MissionAction.self)
+        let observation = store.observeMissionActions(missionID: missionID) { rows in
+            if let action = rows.first(where: { $0.id == actionID }) {
+                continuation.yield(action)
+            }
+        }
+        let settled: MissionAction? = await withTaskCancellationHandler {
+            var result: MissionAction?
+            for await action in stream {
+                if isTerminal(action.status) {
+                    result = action
+                    break
+                }
+            }
+            continuation.finish()
+            _ = observation
+            return result
+        } onCancel: {
+            continuation.finish()
+        }
+        return settled ?? (try? store.fetchMissionAction(id: actionID)) ?? MissionAction(
+            missionID: missionID,
+            turnID: nil,
+            toolName: "",
+            argsJSON: "{}",
+            isObserve: false,
+            sessionID: nil
+        )
+    }
+
+    private func isTerminal(_ status: MissionActionStatus) -> Bool {
+        switch status {
+        case .succeeded, .failed, .rejected: return true
+        default: return false
+        }
+    }
+
+    private func noteToolResultPayload(for action: MissionAction) -> (json: String, isError: Bool) {
+        switch action.status {
+        case .rejected:
+            let reason = action.rejectionReason ?? "User declined to run this tool."
+            return (#"{"error": "\#(reason)"}"#, true)
+        case .failed:
+            return (action.resultJSON ?? #"{"error": "\#(action.error ?? "failed")"}"#, true)
+        case .succeeded:
+            return (action.resultJSON ?? "{}", false)
+        default:
+            return (#"{"error": "no result"}"#, true)
+        }
+    }
+
     private func buildAddressNoteSystemPrompt(note: AddressNote) async -> String {
         var lines = [
             "You are an interactive reverse-engineering assistant pinned to one address. Be specific and concise. Lead with the conclusion; cite registers/strings/calls when relevant.",
+            "You may call any tool. Observe (read-only) and auto-run tools execute immediately. Approval-gated tools queue in the global Action Queue popover and the user must approve them; your reply pauses until each one settles, so propose mutations only when they're clearly warranted, and always say in plain text what you're about to do before the call.",
             "Anchor: \(note.anchor.displayString)",
+            "Session: \(note.sessionID.uuidString) — pass this as `session_id` to tools that require it.",
         ]
         if let dis = disassembler(forSessionID: note.sessionID),
             let node = node(forSessionID: note.sessionID),
             let address = try? node.resolveSyncIfReady(note.anchor)
         {
+            let matchingInsights = (insightsBySession[note.sessionID] ?? []).filter {
+                $0.lastResolvedAddress == address
+            }
+            let named = matchingInsights.first(where: { hasUserTitle($0) }) ?? matchingInsights.first
+            if let named {
+                lines.append("Insight: \"\(displayTitle(for: named))\" — refer to this address by that name.")
+            }
             let lines64 = await dis.disassemble(DisassemblyRequest(address: address, count: 32, appearance: .light))
             let disasm = lines64.map {
                 String(format: "0x%llx", $0.address) + "  " + $0.asmText.plainText
@@ -5034,6 +5251,15 @@ public final class Engine {
         let stillPending = (try? store.fetchMissionActions(missionID: action.missionID))?.contains(where: { $0.status == .pending }) ?? false
         if !stillPending {
             missionExecutor.resume(missionID: action.missionID)
+        }
+    }
+
+    public func cancelAddressNoteReply(sessionID: UUID) async {
+        activeNoteReplyTasks[sessionID]?.cancel()
+        guard let missionID = sessionUIStates[sessionID]?.ambientMissionID else { return }
+        let pending = (try? store.fetchMissionActions(missionID: missionID))?.filter { $0.status == .pending } ?? []
+        for action in pending {
+            await rejectMissionAction(actionID: action.id, reason: "User cancelled the note reply.")
         }
     }
 
