@@ -75,6 +75,9 @@ final class GlobalActionQueuePopover {
             icon.remove(cssClass: "warning")
             badgeLabel.label = ""
             badgeLabel.visible = false
+            if hadPending, popover.visible {
+                popover.popdown()
+            }
         }
         hadPending = hasPending
     }

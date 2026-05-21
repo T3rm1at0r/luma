@@ -46,6 +46,8 @@ struct GlobalActionQueueToolbarItem: View {
         pending = rows
         if wasEmpty, !rows.isEmpty, !isPresented {
             isPresented = true
+        } else if !wasEmpty, rows.isEmpty, isPresented {
+            isPresented = false
         }
     }
 }
