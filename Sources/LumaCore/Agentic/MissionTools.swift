@@ -1313,7 +1313,8 @@ public enum MissionTools {
                 {"type":"object","properties":{"session_id":{"type":"string"},"code":{"type":"string"},"intent":{"type":"string","description":"One sentence shown to the approver explaining why you're running this; logged with the action."}},"required":["session_id","code","intent"],"additionalProperties":false}
                 """,
             isObserve: false,
-            requiresSession: true
+            requiresSession: true,
+            codePreview: CodePreviewArg(field: "code", language: .fridaJavaScript)
         )
         catalog.register(spec: spec) { [weak engine] invocation in
             guard let engine, let sessionID = parseSessionID(invocation.args) else {
@@ -1364,7 +1365,8 @@ public enum MissionTools {
                 {"type":"object","properties":{"session_id":{"type":"string"},"target":{"type":"string","description":"Hex address (0x...) or symbol query for the chosen scope"},"scope":{"type":"string","enum":["function","objc-method","swift-func","java-method","debug-symbol"],"default":"function","description":"Resolver to use when target isn't a hex address. Ignored when target is hex."},"kind":{"type":"string","enum":["function","instruction"],"default":"function"},"code":{"type":"string","description":"Custom JS handler. Omit to use the default stub for this hook kind."}},"required":["session_id","target"],"additionalProperties":false}
                 """,
             isObserve: false,
-            requiresSession: true
+            requiresSession: true,
+            codePreview: CodePreviewArg(field: "code", language: .fridaTypeScript)
         )
         catalog.register(spec: spec) { [weak engine] invocation in
             guard let engine, let sessionID = parseSessionID(invocation.args) else {
@@ -1514,7 +1516,8 @@ public enum MissionTools {
                 {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"},"code":{"type":"string"},"display_name":{"type":"string"},"state":{"type":"string","enum":["enabled","disabled"]},"itrace_arming":{"type":["object","null"],"properties":{"max_invocations":{"type":"integer","minimum":1,"default":5},"max_bytes_per_invocation":{"type":"integer","minimum":1024,"default":1000000}},"additionalProperties":false}},"required":["session_id","hook_id"],"additionalProperties":false}
                 """,
             isObserve: false,
-            requiresSession: true
+            requiresSession: true,
+            codePreview: CodePreviewArg(field: "code", language: .fridaTypeScript)
         )
         catalog.register(spec: spec) { [weak engine] invocation in
             guard let engine, let sessionID = parseSessionID(invocation.args) else {
@@ -1560,7 +1563,8 @@ public enum MissionTools {
                 {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":0},"new_content":{"type":"string"}},"required":["session_id","hook_id","start_line","end_line","new_content"],"additionalProperties":false}
                 """,
             isObserve: false,
-            requiresSession: true
+            requiresSession: true,
+            codePreview: CodePreviewArg(field: "new_content", language: .fridaTypeScript)
         )
         catalog.register(spec: spec) { [weak engine] invocation in
             guard let engine, let sessionID = parseSessionID(invocation.args) else {
@@ -1807,7 +1811,8 @@ public enum MissionTools {
                 {"type":"object","properties":{"def_id":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["def_id","path","content"],"additionalProperties":false}
                 """,
             isObserve: false,
-            requiresSession: false
+            requiresSession: false,
+            codePreview: CodePreviewArg(field: "content", language: .fridaTypeScript)
         )
         catalog.register(spec: spec) { [weak engine] invocation in
             await withResolvedCustomInstrumentDef(invocation.args, engine: engine) { engine, defID, _ in
@@ -1837,7 +1842,8 @@ public enum MissionTools {
                 {"type":"object","properties":{"def_id":{"type":"string"},"path":{"type":"string"},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":0},"new_content":{"type":"string"}},"required":["def_id","path","start_line","end_line","new_content"],"additionalProperties":false}
                 """,
             isObserve: false,
-            requiresSession: false
+            requiresSession: false,
+            codePreview: CodePreviewArg(field: "new_content", language: .fridaTypeScript)
         )
         catalog.register(spec: spec) { [weak engine] invocation in
             await withResolvedCustomInstrumentFile(invocation.args, engine: engine) { engine, defID, _, file in

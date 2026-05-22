@@ -88,7 +88,7 @@ private struct ActionCard: View {
     var body: some View {
         let parsed = parsedArgs(action.argsJSON)
         let codeView = codeArgView(toolName: action.toolName, args: parsed, engine: engine)
-        let remainingJSON = jsonWithoutCodeField(toolName: action.toolName, args: parsed)
+        let remainingJSON = jsonWithoutCodeField(toolName: action.toolName, args: parsed, engine: engine)
 
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -126,7 +126,7 @@ private struct ActionCard: View {
 
 @ViewBuilder
 private func codeArgView(toolName: String, args: [String: Any], engine: Engine) -> some View {
-    if let attachment = codeAttachment(toolName: toolName, args: args) {
+    if let attachment = codeAttachment(toolName: toolName, args: args, engine: engine) {
         ReadOnlyCodeView(source: attachment.source, profile: attachment.profile, engine: engine)
             .frame(height: 180)
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
@@ -162,28 +162,26 @@ private struct CodeAttachment {
     let profile: EditorProfile
 }
 
-private func codeAttachment(toolName: String, args: [String: Any]) -> CodeAttachment? {
-    switch toolName {
-    case "eval_repl":
-        return (args["code"] as? String).map { CodeAttachment(source: $0, profile: .fridaCodeShare()) }
-    case "install_tracer_hook", "update_tracer_hook":
-        return (args["code"] as? String).map { CodeAttachment(source: $0, profile: .fridaTracerHook(packages: [])) }
-    case "write_custom_instrument_file", "create_custom_instrument_file", "update_custom_instrument_file":
-        return (args["contents"] as? String).map { CodeAttachment(source: $0, profile: .fridaTracerHook(packages: [])) }
-    default:
-        return nil
+private func codeAttachment(toolName: String, args: [String: Any], engine: Engine) -> CodeAttachment? {
+    guard let preview = engine.missionTools.spec(named: toolName)?.codePreview,
+        let source = args[preview.field] as? String
+    else { return nil }
+    return CodeAttachment(source: source, profile: editorProfile(for: preview.language))
+}
+
+private func editorProfile(for language: CodePreviewLanguage) -> EditorProfile {
+    switch language {
+    case .fridaJavaScript:
+        return .fridaCodeShare()
+    case .fridaTypeScript:
+        return .fridaTracerHook(packages: [])
     }
 }
 
-private func jsonWithoutCodeField(toolName: String, args: [String: Any]) -> String? {
+private func jsonWithoutCodeField(toolName: String, args: [String: Any], engine: Engine) -> String? {
     var stripped = args
-    switch toolName {
-    case "eval_repl", "install_tracer_hook", "update_tracer_hook":
-        stripped.removeValue(forKey: "code")
-    case "write_custom_instrument_file", "create_custom_instrument_file", "update_custom_instrument_file":
-        stripped.removeValue(forKey: "contents")
-    default:
-        break
+    if let field = engine.missionTools.spec(named: toolName)?.codePreview?.field {
+        stripped.removeValue(forKey: field)
     }
     if stripped.isEmpty { return nil }
     guard let data = try? JSONSerialization.data(withJSONObject: stripped, options: [.prettyPrinted, .sortedKeys]),

@@ -1,24 +1,42 @@
 import Foundation
 
+public enum CodePreviewLanguage: String, Sendable, Equatable {
+    case fridaJavaScript
+    case fridaTypeScript
+}
+
+public struct CodePreviewArg: Sendable, Equatable {
+    public let field: String
+    public let language: CodePreviewLanguage
+
+    public init(field: String, language: CodePreviewLanguage) {
+        self.field = field
+        self.language = language
+    }
+}
+
 public struct ActionSpec: Sendable {
     public var name: String
     public var description: String
     public var inputSchemaJSON: String
     public var isObserve: Bool
     public var requiresSession: Bool
+    public var codePreview: CodePreviewArg?
 
     public init(
         name: String,
         description: String,
         inputSchemaJSON: String,
         isObserve: Bool,
-        requiresSession: Bool
+        requiresSession: Bool,
+        codePreview: CodePreviewArg? = nil
     ) {
         self.name = name
         self.description = description
         self.inputSchemaJSON = inputSchemaJSON
         self.isObserve = isObserve
         self.requiresSession = requiresSession
+        self.codePreview = codePreview
     }
 
     public func toToolSpec(cacheBoundary: Bool = false) -> LLMToolSpec {
