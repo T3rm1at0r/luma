@@ -49,6 +49,8 @@ public final class CompilerWorkspace {
                     try fm.createDirectory(at: paths.root, withIntermediateDirectories: true)
                 }
 
+                try self.discardOrphanedDiskState(packagesState: packagesState, paths: paths)
+
                 if packagesState.packageJSON != nil || packagesState.packageLockJSON != nil {
                     try self.writeManifestsToDisk(from: packagesState, paths: paths)
 
@@ -110,6 +112,8 @@ public final class CompilerWorkspace {
         paths: CompilerWorkspacePaths
     ) async throws -> InstalledPackage {
         var packagesState = try store.fetchPackagesState()
+
+        try discardOrphanedDiskState(packagesState: packagesState, paths: paths)
 
         let spec = versionSpec.map { "\(name)@\($0)" } ?? name
 
@@ -312,6 +316,16 @@ public final class CompilerWorkspace {
         } else {
             try? fm.removeItem(at: paths.packageLockJSON)
         }
+    }
+
+    private func discardOrphanedDiskState(
+        packagesState: ProjectPackagesState,
+        paths: CompilerWorkspacePaths
+    ) throws {
+        guard packagesState.packageJSON == nil, packagesState.packageLockJSON == nil else { return }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: paths.packageJSON.path) || fm.fileExists(atPath: paths.nodeModules.path) else { return }
+        try deleteWorkspaceManifestsAndNodeModules(paths: paths)
     }
 
     private func readManifestsFromDisk(paths: CompilerWorkspacePaths) throws -> (packageJSON: Data?, packageLockJSON: Data?) {
