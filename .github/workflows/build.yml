@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  FRIDA_CORE_REF: "739e3f626ec7d6ddc97e85e924e38875beaeeb8f"
+  FRIDA_CORE_REF: "5e8ddd68633de4f1a1c0c71c205f430adb39e73c"
   RADARE2_REF: "7ed1e8c6fd000b99c8aa6835e12bef1657d92746"
   SPARKLE_VERSION: "2.9.1"
   SWIFT_VERSION: "6.2"
