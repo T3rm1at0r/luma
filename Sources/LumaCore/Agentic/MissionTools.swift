@@ -518,7 +518,7 @@ public enum MissionTools {
     private static func registerListSessionInstruments(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "list_session_instruments",
-            description: "List all instruments currently attached to a session: tracer hooks, custom instrument instances, hookpacks, and codeshare snippets. Returns id, kind, source_identifier, state. Use to understand what's already running before adding more.",
+            description: "List all instruments currently attached to a session: tracer hooks, custom instrument instances, hookpacks, and codeshare snippets. Returns id, kind, source_identifier, state (enabled/disabled), attachment (attached/detached), status (present when the instance failed to load/reload/validate), and component_statuses (per-hook compile failures on tracer instances). Use to understand what's already running and whether anything is in error before adding more.",
             inputSchemaJSON: """
                 {"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":false}
                 """,
@@ -530,16 +530,33 @@ public enum MissionTools {
                 return errorResult("missing or invalid session_id", code: .invalidInput)
             }
             let instances = engine.instrumentsBySession[sessionID] ?? []
+            let node = engine.node(forSessionID: sessionID)
             let array: [[String: Any]] = instances.map { instance in
-                [
-                    "id": instance.id.uuidString,
-                    "kind": instance.kind.rawValue,
-                    "source_identifier": instance.sourceIdentifier,
-                    "state": instance.state.rawValue,
-                ]
+                instanceListEntry(instance, ref: node?.instruments.first(where: { $0.id == instance.id }))
             }
             return makeResult(jsonObject: array, summary: "\(array.count) instrument\(array.count == 1 ? "" : "s") attached")
         }
+    }
+
+    private static func instanceListEntry(_ instance: InstrumentInstance, ref: ProcessNode.InstrumentRef?) -> [String: Any] {
+        var entry: [String: Any] = [
+            "id": instance.id.uuidString,
+            "kind": instance.kind.rawValue,
+            "source_identifier": instance.sourceIdentifier,
+            "state": instance.state.rawValue,
+            "attachment": ref?.attachment.rawValue ?? "detached",
+        ]
+        if let status = ref?.status {
+            entry["status"] = status.toWireJSON()
+        }
+        if let statuses = ref?.componentStatuses, !statuses.isEmpty {
+            entry["component_statuses"] = statuses.map { (id, status) -> [String: Any] in
+                var obj = status.toWireJSON()
+                obj["component_id"] = id.uuidString
+                return obj
+            }
+        }
+        return entry
     }
 
     // MARK: - arm_session / disarm_session
@@ -1461,7 +1478,7 @@ public enum MissionTools {
     private static func registerListTracerHooks(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "list_tracer_hooks",
-            description: "List tracer hooks installed on the session. Returns metadata only (id, target, kind, state, itrace). Fetch the JS body via read_tracer_hook when you need it.",
+            description: "List tracer hooks installed on the session. Returns metadata only (id, target, kind, state, itrace) plus `compile_error` on any hook whose JS failed to compile. Fetch the JS body via read_tracer_hook when you need it.",
             inputSchemaJSON: """
                 {"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":false}
                 """,
@@ -1476,7 +1493,11 @@ public enum MissionTools {
                 return makeResult(jsonObject: [], summary: "No tracer instrument on this session")
             }
             let array: [[String: Any]] = hooks.map { hook in
-                hookListEntry(hook)
+                var entry = hookListEntry(hook)
+                if let err = tracerHookComponentStatus(engine: engine, sessionID: sessionID, hookID: hook.id) {
+                    entry["compile_error"] = err
+                }
+                return entry
             }
             return makeResult(jsonObject: array, summary: "\(hooks.count) tracer hook\(hooks.count == 1 ? "" : "s")")
         }
@@ -1505,6 +1526,9 @@ public enum MissionTools {
             var payload = hookListEntry(hook)
             payload["code"] = numberedContent(hook.code)
             payload["line_count"] = lineCount(of: hook.code)
+            if let err = tracerHookComponentStatus(engine: engine, sessionID: sessionID, hookID: hookID) {
+                payload["compile_error"] = err
+            }
             return makeResult(jsonObject: payload, summary: "Hook \(hook.displayName)")
         }
     }
@@ -1546,7 +1570,7 @@ public enum MissionTools {
             }) else {
                 return errorResult("no tracer hook with id \(hookID)", code: .notFound)
             }
-            return makeResult(jsonObject: hookListEntry(updated), summary: "Updated hook \(updated.displayName)")
+            return tracerHookEditResult(engine: engine, sessionID: sessionID, hook: updated, summaryPrefix: "Updated hook \(updated.displayName)")
         }
     }
 
@@ -1598,10 +1622,28 @@ public enum MissionTools {
             }) else {
                 return errorResult("no tracer hook with id \(hookID)", code: .notFound)
             }
-            var payload = hookListEntry(updated)
-            payload["line_count"] = lineCount(of: updatedCode)
-            return makeResult(jsonObject: payload, summary: "Edited hook \(updated.displayName) lines \(startLine)–\(endLine)")
+            return tracerHookEditResult(
+                engine: engine,
+                sessionID: sessionID,
+                hook: updated,
+                summaryPrefix: "Edited hook \(updated.displayName) lines \(startLine)–\(endLine)",
+                extraFields: ["line_count": lineCount(of: updatedCode)]
+            )
         }
+    }
+
+    private static func tracerHookEditResult(
+        engine: Engine,
+        sessionID: UUID,
+        hook: TracerConfig.Hook,
+        summaryPrefix: String,
+        extraFields: [String: Any] = [:]
+    ) -> ActionResult {
+        var payload = hookListEntry(hook)
+        for (k, v) in extraFields { payload[k] = v }
+        let apply = tracerHookApplyJSON(engine: engine, sessionID: sessionID, hookID: hook.id)
+        payload["apply"] = apply
+        return makeResult(jsonObject: payload, summary: summaryPrefix + applySummarySuffix(apply))
     }
 
     private static func hookListEntry(_ hook: TracerConfig.Hook) -> [String: Any] {
@@ -1618,6 +1660,44 @@ public enum MissionTools {
             ]
         }
         return entry
+    }
+
+    private static func tracerHookComponentStatus(engine: Engine, sessionID: UUID, hookID: UUID) -> [String: Any]? {
+        guard let node = engine.node(forSessionID: sessionID),
+            let ref = node.instruments.first(where: { $0.kind == .tracer }),
+            let status = ref.componentStatuses[hookID]
+        else { return nil }
+        return status.toWireJSON()
+    }
+
+    private static func tracerHookApplyJSON(engine: Engine, sessionID: UUID, hookID: UUID) -> [String: Any] {
+        guard let node = engine.node(forSessionID: sessionID),
+            let ref = node.instruments.first(where: { $0.kind == .tracer }),
+            ref.attachment == .attached
+        else {
+            return ["applied": false, "reason": "session not attached — edit persisted; will compile on next attach"]
+        }
+        if let status = ref.componentStatuses[hookID] {
+            return ["applied": false, "compile_error": status.toWireJSON()]
+        }
+        if let status = ref.status {
+            return ["applied": false, "instrument_error": status.toWireJSON()]
+        }
+        return ["applied": true]
+    }
+
+    private static func applySummarySuffix(_ apply: [String: Any]) -> String {
+        if apply["applied"] as? Bool == true { return "" }
+        if let err = apply["compile_error"] as? [String: Any], let msg = err["message"] as? String {
+            return " — compile error: \(msg.prefix(80))"
+        }
+        if let err = apply["instrument_error"] as? [String: Any], let msg = err["message"] as? String {
+            return " — instrument error: \(msg.prefix(80))"
+        }
+        if let reason = apply["reason"] as? String {
+            return " — \(reason)"
+        }
+        return ""
     }
 
     private static func registerRemoveTracerHook(in catalog: ToolCatalog, engine: Engine) {
@@ -1753,7 +1833,13 @@ public enum MissionTools {
                     def.widgets = parseWidgetsArg(invocation.args["widgets"])
                 }
                 engine.updateCustomInstrument(def)
-                return makeResult(jsonObject: ["def_id": def.id.uuidString, "name": def.name], summary: "Updated custom instrument \(def.name)")
+                await engine.awaitCustomInstrumentReload(defID: def.id)
+                return customInstrumentEditResult(
+                    engine: engine,
+                    defID: def.id,
+                    summaryPrefix: "Updated custom instrument \(def.name)",
+                    extraFields: ["name": def.name]
+                )
             }
         }
     }
@@ -1824,7 +1910,13 @@ public enum MissionTools {
                     return errorResult("missing content", code: .invalidInput)
                 }
                 engine.writeCustomInstrumentFile(defID: defID, path: path, content: content)
-                return makeResult(jsonObject: ["def_id": defID.uuidString, "path": path], summary: "Wrote \(path)")
+                await engine.awaitCustomInstrumentReload(defID: defID)
+                return customInstrumentEditResult(
+                    engine: engine,
+                    defID: defID,
+                    summaryPrefix: "Wrote \(path)",
+                    extraFields: ["path": path]
+                )
             }
         }
     }
@@ -1865,13 +1957,12 @@ public enum MissionTools {
                     return errorResult(message, code: .invalidInput)
                 }
                 engine.writeCustomInstrumentFile(defID: defID, path: file.path, content: updated)
-                return makeResult(
-                    jsonObject: [
-                        "def_id": defID.uuidString,
-                        "path": file.path,
-                        "line_count": lineCount(of: updated),
-                    ],
-                    summary: "Edited \(file.path) lines \(startLine)–\(endLine)"
+                await engine.awaitCustomInstrumentReload(defID: defID)
+                return customInstrumentEditResult(
+                    engine: engine,
+                    defID: defID,
+                    summaryPrefix: "Edited \(file.path) lines \(startLine)–\(endLine)",
+                    extraFields: ["path": file.path, "line_count": lineCount(of: updated)]
                 )
             }
         }
@@ -1893,7 +1984,13 @@ public enum MissionTools {
                     return errorResult("cannot delete entrypoint '\(file.path)' — re-point with set_custom_instrument_entrypoint first", code: .invalidInput)
                 }
                 engine.deleteCustomInstrumentFile(defID: defID, path: file.path)
-                return makeResult(jsonObject: ["def_id": defID.uuidString, "path": file.path], summary: "Deleted \(file.path)")
+                await engine.awaitCustomInstrumentReload(defID: defID)
+                return customInstrumentEditResult(
+                    engine: engine,
+                    defID: defID,
+                    summaryPrefix: "Deleted \(file.path)",
+                    extraFields: ["path": file.path]
+                )
             }
         }
     }
@@ -1919,7 +2016,13 @@ public enum MissionTools {
                     return errorResult("no file '\(from)'", code: .notFound)
                 }
                 engine.renameCustomInstrumentFile(defID: defID, from: from, to: to)
-                return makeResult(jsonObject: ["def_id": defID.uuidString, "from": from, "to": to], summary: "Renamed \(from) → \(to)")
+                await engine.awaitCustomInstrumentReload(defID: defID)
+                return customInstrumentEditResult(
+                    engine: engine,
+                    defID: defID,
+                    summaryPrefix: "Renamed \(from) → \(to)",
+                    extraFields: ["from": from, "to": to]
+                )
             }
         }
     }
@@ -1937,9 +2040,77 @@ public enum MissionTools {
         catalog.register(spec: spec) { [weak engine] invocation in
             await withResolvedCustomInstrumentFile(invocation.args, engine: engine) { engine, defID, _, file in
                 engine.setCustomInstrumentEntrypoint(defID: defID, path: file.path)
-                return makeResult(jsonObject: ["def_id": defID.uuidString, "entrypoint": file.path], summary: "Entrypoint set to \(file.path)")
+                await engine.awaitCustomInstrumentReload(defID: defID)
+                return customInstrumentEditResult(
+                    engine: engine,
+                    defID: defID,
+                    summaryPrefix: "Entrypoint set to \(file.path)",
+                    extraFields: ["entrypoint": file.path]
+                )
             }
         }
+    }
+
+    private static func customInstrumentEditResult(
+        engine: Engine,
+        defID: UUID,
+        summaryPrefix: String,
+        extraFields: [String: Any] = [:]
+    ) -> ActionResult {
+        var payload: [String: Any] = ["def_id": defID.uuidString]
+        for (k, v) in extraFields { payload[k] = v }
+        let apply = customInstrumentApplyJSON(engine: engine, defID: defID)
+        payload["apply"] = apply
+        return makeResult(jsonObject: payload, summary: summaryPrefix + customInstrumentSummarySuffix(apply))
+    }
+
+    private static func customInstrumentApplyJSON(engine: Engine, defID: UUID) -> [String: Any] {
+        let key = defID.uuidString
+        var appliedSessions: [[String: Any]] = []
+        var errors: [[String: Any]] = []
+        var detachedSessions: [String] = []
+        for (sessionID, instances) in engine.instrumentsBySession {
+            for inst in instances where inst.kind == .custom && inst.sourceIdentifier == key {
+                guard let node = engine.node(forSessionID: sessionID),
+                    let ref = node.instruments.first(where: { $0.id == inst.id })
+                else {
+                    detachedSessions.append(sessionID.uuidString)
+                    continue
+                }
+                if let status = ref.status {
+                    errors.append([
+                        "session_id": sessionID.uuidString,
+                        "instance_id": inst.id.uuidString,
+                        "error": status.toWireJSON(),
+                    ])
+                } else if ref.attachment == .attached {
+                    appliedSessions.append([
+                        "session_id": sessionID.uuidString,
+                        "instance_id": inst.id.uuidString,
+                    ])
+                } else {
+                    detachedSessions.append(sessionID.uuidString)
+                }
+            }
+        }
+        var out: [String: Any] = ["applied_sessions": appliedSessions]
+        if !errors.isEmpty { out["errors"] = errors }
+        if !detachedSessions.isEmpty { out["detached_sessions"] = detachedSessions }
+        return out
+    }
+
+    private static func customInstrumentSummarySuffix(_ apply: [String: Any]) -> String {
+        if let errors = apply["errors"] as? [[String: Any]], let first = errors.first,
+            let status = first["error"] as? [String: Any], let msg = status["message"] as? String
+        {
+            let n = errors.count
+            return " — error on \(n) session\(n == 1 ? "" : "s"): \(msg.prefix(80))"
+        }
+        let appliedCount = (apply["applied_sessions"] as? [[String: Any]])?.count ?? 0
+        if appliedCount > 0 {
+            return " — applied on \(appliedCount) session\(appliedCount == 1 ? "" : "s")"
+        }
+        return ""
     }
 
     private static func registerDeleteCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
@@ -3582,8 +3753,10 @@ public enum MissionTools {
             else {
                 return errorResult("missing widget or action", code: .invalidInput)
             }
-            guard let instance = engine.instrumentsBySession[sessionID]?.first(where: { $0.id == instanceID }) else {
-                return errorResult("no instrument \(instanceID) on session \(sessionID)", code: .notFound)
+            let instance: InstrumentInstance
+            switch resolveLiveInstrument(engine: engine, sessionID: sessionID, instanceID: instanceID) {
+            case .found(let live): instance = live.instance
+            case .error(let err): return err
             }
             let item = invocation.args["item"] as? String
             await engine.invokeWidgetAction(instance: instance, widget: widget, action: action, item: item)
@@ -3622,8 +3795,10 @@ public enum MissionTools {
             guard let text = invocation.args["text"] as? String else {
                 return errorResult("missing text", code: .invalidInput)
             }
-            guard let instance = engine.instrumentsBySession[sessionID]?.first(where: { $0.id == instanceID }) else {
-                return errorResult("no instrument \(instanceID) on session \(sessionID)", code: .notFound)
+            let instance: InstrumentInstance
+            switch resolveLiveInstrument(engine: engine, sessionID: sessionID, instanceID: instanceID) {
+            case .found(let live): instance = live.instance
+            case .error(let err): return err
             }
             let timeoutMs = (invocation.args["timeout_ms"] as? Int) ?? 2000
             let response = await engine.submitConsoleInputAndAwait(
@@ -3645,6 +3820,49 @@ public enum MissionTools {
 
     private static func consoleEntryJSON(_ entry: WidgetConsoleEntry) -> [String: Any] {
         entry.toWireJSON()
+    }
+
+    private struct LiveInstrument {
+        let instance: InstrumentInstance
+        let node: ProcessNode
+        let ref: ProcessNode.InstrumentRef
+    }
+
+    private enum LiveInstrumentLookup {
+        case found(LiveInstrument)
+        case error(ActionResult)
+    }
+
+    private static func resolveLiveInstrument(
+        engine: Engine,
+        sessionID: UUID,
+        instanceID: UUID
+    ) -> LiveInstrumentLookup {
+        guard let session = engine.sessions.first(where: { $0.id == sessionID }) else {
+            return .error(errorResult("no session with id \(sessionID)", code: .notFound))
+        }
+        guard let node = engine.node(forSessionID: sessionID) else {
+            return .error(errorResult(
+                "session \(sessionID) is not attached (phase=\(phaseDescription(session.phase)))",
+                code: .unavailable
+            ))
+        }
+        guard let instance = engine.instrumentsBySession[sessionID]?.first(where: { $0.id == instanceID }) else {
+            return .error(errorResult("no instrument \(instanceID) on session \(sessionID)", code: .notFound))
+        }
+        guard let ref = node.instruments.first(where: { $0.id == instanceID }), ref.attachment == .attached else {
+            return .error(errorResult(
+                "instrument \(instanceID) is not attached on session \(sessionID) — recompile may have failed",
+                code: .unavailable
+            ))
+        }
+        if let status = ref.status {
+            return .error(errorResult(
+                "instrument \(instanceID) is in error state: \(status.summary)",
+                code: .unavailable
+            ))
+        }
+        return .found(LiveInstrument(instance: instance, node: node, ref: ref))
     }
 
     private static func registerDetachSession(in catalog: ToolCatalog, engine: Engine) {

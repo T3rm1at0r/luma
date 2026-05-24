@@ -92,6 +92,7 @@ public final class Engine {
     private var addressActionProviders: [AddressActionProvider] = []
     private var runningCustomInstrumentReloads: Set<UUID> = []
     private var pendingCustomInstrumentReloads: Set<UUID> = []
+    private var customInstrumentReloadWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
     private var threadActionProviders: [ThreadActionProvider] = []
     @ObservationIgnored public var onSessionListChanged: (@MainActor (SessionListChange) -> Void)?
     @ObservationIgnored public var onREPLCellAdded: (@MainActor (REPLCell) -> Void)?
@@ -4174,6 +4175,15 @@ public final class Engine {
             await reloadCustomInstrumentInstances(defID: defID)
         } while pendingCustomInstrumentReloads.contains(defID)
         runningCustomInstrumentReloads.remove(defID)
+        let waiters = customInstrumentReloadWaiters.removeValue(forKey: defID) ?? []
+        for cont in waiters { cont.resume() }
+    }
+
+    public func awaitCustomInstrumentReload(defID: UUID) async {
+        guard runningCustomInstrumentReloads.contains(defID) else { return }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            customInstrumentReloadWaiters[defID, default: []].append(cont)
+        }
     }
 
     private func touchUpdatedAt(defID: UUID) -> CustomInstrumentDef {
