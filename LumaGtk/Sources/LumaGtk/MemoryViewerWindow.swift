@@ -11,7 +11,7 @@ final class MemoryViewerWindow {
     private let sessionID: UUID
     private let address: UInt64
 
-    private let spinner: Adw.Spinner
+    private let spinner: Spinner
     private let statusLabel: Label
     private let lengthLabel: Label
     private let hexView: HexView
@@ -45,7 +45,7 @@ final class MemoryViewerWindow {
         addrLabel.selectable = true
         headerRow.append(child: addrLabel)
 
-        spinner = Adw.Spinner()
+        spinner = makeSpinner()
         spinner.visible = false
         headerRow.append(child: spinner)
 

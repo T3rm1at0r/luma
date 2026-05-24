@@ -1077,7 +1077,7 @@ final class EventStreamPane {
         title.halign = .start
         title.hexpand = true
         header.append(child: title)
-        let spinner = Adw.Spinner()
+        let spinner = makeSpinner()
         spinner.valign = .center
         spinner.visible = false
         header.append(child: spinner)

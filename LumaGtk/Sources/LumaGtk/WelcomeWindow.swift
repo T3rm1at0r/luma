@@ -24,7 +24,7 @@ final class WelcomeWindow {
     private let labsScroller: ScrolledWindow
     private let labsList: ListBox
     private let labsStateBox: Box
-    private let labsSpinner: Adw.Spinner
+    private let labsSpinner: Spinner
     private let labsStateLabel: Label
     private let signInBox: Box
     private let signInButton: Button
@@ -69,7 +69,7 @@ final class WelcomeWindow {
         labsScroller = ScrolledWindow()
         labsList = ListBox()
         labsStateBox = Box(orientation: .horizontal, spacing: 8)
-        labsSpinner = Adw.Spinner()
+        labsSpinner = makeSpinner()
         labsStateLabel = Label(str: "")
 
         signInBox = Box(orientation: .vertical, spacing: 10)

@@ -1,3 +1,4 @@
+import CGtk
 import Foundation
 import Frida
 import Gdk
@@ -48,6 +49,7 @@ enum IconPixbuf {
         let bytes = pixels.withUnsafeBufferPointer { buf in
             Bytes(data: UnsafeRawPointer(buf.baseAddress!), size: pixels.count)
         }
+        #if HAS_GDK_MEMORY_TEXTURE_BUILDER
         let builder = Gdk.MemoryTextureBuilder()
         builder.set(bytes: bytes)
         builder.set(format: .r8g8b8a8)
@@ -56,6 +58,15 @@ enum IconPixbuf {
         builder.set(stride: rowstride)
         guard let ref = builder.build() else { return nil }
         return Gdk.Texture(ref.texture_ptr)
+        #else
+        guard let raw = gdk_memory_texture_new(
+            gint(width), gint(height),
+            GDK_MEMORY_R8G8B8A8,
+            bytes.bytes_ptr,
+            gsize(rowstride)
+        ) else { return nil }
+        return Gdk.Texture(raw)
+        #endif
     }
 
     private static func makePNGTexture(data: [UInt8]) -> Gdk.Texture? {

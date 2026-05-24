@@ -12,7 +12,7 @@ final class PackageSearchDialog {
 
     private let widget: Box
     private let searchEntry: Entry
-    private let searchSpinner: Adw.Spinner
+    private let searchSpinner: Spinner
     private let listBox: ListBox
     private let statusLabel: Label
     private let errorLabel: Label
@@ -20,7 +20,7 @@ final class PackageSearchDialog {
     private let specifierEntry: Entry
     private let aliasEntry: Entry
     private let installButton: Button
-    private let installSpinner: Adw.Spinner
+    private let installSpinner: Spinner
 
     private let manager = PackageManager()
 
@@ -48,7 +48,7 @@ final class PackageSearchDialog {
         searchEntry.hexpand = true
         searchRow.append(child: searchEntry)
 
-        searchSpinner = Adw.Spinner()
+        searchSpinner = makeSpinner()
         searchSpinner.visible = false
         searchSpinner.setSizeRequest(width: 16, height: 16)
         searchRow.append(child: searchSpinner)
@@ -114,7 +114,7 @@ final class PackageSearchDialog {
         let spacer = Label(str: "")
         spacer.hexpand = true
         installRow.append(child: spacer)
-        installSpinner = Adw.Spinner()
+        installSpinner = makeSpinner()
         installSpinner.visible = false
         installRow.append(child: installSpinner)
         installButton = Button(label: "Add Package")

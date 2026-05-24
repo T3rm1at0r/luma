@@ -30,7 +30,7 @@ final class AddressNotePopover {
     private var inputView: TextView?
     private var saveButton: Button?
     private var askButton: Button?
-    private var askSpinner: Adw.Spinner?
+    private var askSpinner: Spinner?
     private var askIcon: Gtk.Image?
     private var cancelIcon: Gtk.Image?
     private var streamingRow: Widget?
@@ -583,7 +583,7 @@ final class AddressNotePopover {
         let cancelIcon = Gtk.Image(iconName: "media-playback-stop-symbolic")
         cancelIcon.pixelSize = 14
         cancelIcon.visible = false
-        let spinner = Adw.Spinner()
+        let spinner = makeSpinner()
         spinner.visible = false
         let askContent = Box(orientation: .horizontal, spacing: 0)
         askContent.append(child: askIcon)

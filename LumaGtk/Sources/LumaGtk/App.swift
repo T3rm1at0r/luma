@@ -1,5 +1,6 @@
 import Adw
 import CGLib
+import CGtk
 import CLuma
 import Foundation
 import Gdk
@@ -495,7 +496,7 @@ final class LumaApplication {
                 row.set(title: item.title)
                 let label = Label(str: Self.humanReadableAccel(item.accel))
                 label.add(cssClass: "dim-label")
-                row.add(suffix: label)
+                row.addSuffix(widget: label)
                 list.append(child: row)
             }
             content.append(child: list)

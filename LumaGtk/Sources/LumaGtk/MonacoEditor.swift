@@ -86,7 +86,7 @@ public final class MonacoEditor {
         container.hexpand = true
         container.vexpand = true
 
-        let spinner = Adw.Spinner()
+        let spinner = makeSpinner()
         spinner.halign = .center
         spinner.valign = .center
 

@@ -703,7 +703,7 @@ final class NotebookPane {
         stack.marginTop = 24
         stack.marginBottom = 24
 
-        let spinner = Adw.Spinner()
+        let spinner = makeSpinner()
         spinner.halign = .center
         spinner.setSizeRequest(width: 32, height: 32)
         stack.append(child: spinner)

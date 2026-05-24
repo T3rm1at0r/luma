@@ -77,7 +77,7 @@ final class GitHubSignInSheet {
 
         statusRow = Box(orientation: .horizontal, spacing: 8)
         statusRow.halign = .center
-        statusRow.append(child: Adw.Spinner())
+        statusRow.append(child: makeSpinner())
         statusLabel = Label(str: "Waiting for authorization\u{2026}")
         statusLabel.add(cssClass: "dim-label")
         statusRow.append(child: statusLabel)

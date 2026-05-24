@@ -123,7 +123,7 @@ final class ITraceDetailView {
         entriesScroll.vexpand = true
         entriesScroll.set(child: entriesList)
 
-        let spinner = Adw.Spinner()
+        let spinner = makeSpinner()
         let loading = Box(orientation: .horizontal, spacing: 8)
         loading.halign = .center
         loading.marginTop = 24

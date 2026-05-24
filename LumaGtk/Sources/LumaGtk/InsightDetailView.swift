@@ -37,7 +37,7 @@ final class InsightDetailView {
     private let contentOverlay: Overlay
     private let contentHost: Box
     private let spinnerHost: Box
-    private let spinner: Adw.Spinner
+    private let spinner: Spinner
     private var spinnerTask: Task<Void, Never>?
 
     private let disasmHost: Box
@@ -120,7 +120,7 @@ final class InsightDetailView {
         contentHost.marginBottom = 8
         contentOverlay.set(child: contentHost)
 
-        spinner = Adw.Spinner()
+        spinner = makeSpinner()
 
         spinnerHost = Box(orientation: .horizontal, spacing: 0)
         spinnerHost.add(cssClass: "luma-loading-capsule")

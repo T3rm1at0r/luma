@@ -171,6 +171,9 @@ func adwaitaFeatureDefines() -> [SwiftSetting] {
     if pkgConfigAtLeast("libadwaita-1", "1.8") {
         defines.append(.define("HAS_ADW_SHORTCUTS_DIALOG"))
     }
+    if pkgConfigAtLeast("gtk4", "4.16") {
+        defines.append(.define("HAS_GDK_MEMORY_TEXTURE_BUILDER"))
+    }
     return defines
 }
 

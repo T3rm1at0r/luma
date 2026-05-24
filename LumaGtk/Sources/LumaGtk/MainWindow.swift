@@ -2887,7 +2887,7 @@ final class MainWindow: InstrumentUIHost {
 
         guard shouldShowDetachedIndicator(session) else { return }
         if session.phase == .attaching {
-            let spinner = Adw.Spinner()
+            let spinner = makeSpinner()
             spinner.tooltipText = "\(session.kind.reestablishLabel)ing\u{2026}"
             host.append(child: spinner)
             return

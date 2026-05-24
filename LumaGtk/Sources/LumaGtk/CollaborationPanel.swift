@@ -644,7 +644,7 @@ final class CollaborationPanel {
 
         case .connecting:
             let row = Box(orientation: .horizontal, spacing: 6)
-            row.append(child: Adw.Spinner())
+            row.append(child: makeSpinner())
             let label = Label(str: "Connecting\u{2026}")
             label.halign = .start
             label.hexpand = true

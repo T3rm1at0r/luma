@@ -21,10 +21,10 @@ final class CodeShareBrowser {
     private let searchEntry: Entry
     private let listBox: ListBox
     private let errorLabel: Label
-    private let listSpinner: Adw.Spinner
+    private let listSpinner: Spinner
 
     private let detailContainer: Box
-    private let detailSpinner: Adw.Spinner
+    private let detailSpinner: Spinner
     private let titleLabel: Label
     private let ownerLabel: Label
     private let descriptionLabel: Label
@@ -75,7 +75,7 @@ final class CodeShareBrowser {
         searchEntry.visible = false
         toolbar.append(child: searchEntry)
 
-        listSpinner = Adw.Spinner()
+        listSpinner = makeSpinner()
         listSpinner.visible = false
         toolbar.append(child: listSpinner)
 
@@ -121,7 +121,7 @@ final class CodeShareBrowser {
         titleLabel.hexpand = true
         headerRow.append(child: titleLabel)
 
-        detailSpinner = Adw.Spinner()
+        detailSpinner = makeSpinner()
         detailSpinner.visible = false
         headerRow.append(child: detailSpinner)
         detailContainer.append(child: headerRow)

@@ -49,7 +49,7 @@ final class ITraceDiffView {
         bodyContainer.marginTop = 8
         widget.append(child: bodyContainer)
 
-        let spinner = Adw.Spinner()
+        let spinner = makeSpinner()
         let loading = Box(orientation: .horizontal, spacing: 8)
         loading.halign = .center
         loading.marginTop = 24

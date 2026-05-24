@@ -17,7 +17,7 @@ final class PackageDetailPane {
     private let aliasLabel: Label
     private let upgradeButton: Button
     private let removeButton: Button
-    private let busySpinner: Adw.Spinner
+    private let busySpinner: Spinner
     private let statusLabel: Label
     private let errorLabel: Label
     private let filesContainer: Box
@@ -64,7 +64,7 @@ final class PackageDetailPane {
         upgradeButton = Button(label: "Upgrade to Latest")
         removeButton = Button(label: "Remove Package")
         removeButton.add(cssClass: "destructive-action")
-        busySpinner = Adw.Spinner()
+        busySpinner = makeSpinner()
         busySpinner.visible = false
         actions.append(child: upgradeButton)
         actions.append(child: removeButton)

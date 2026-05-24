@@ -26,7 +26,7 @@ final class TargetPicker {
     private let processList: ListBox
     private let processStatus: Label
     private let processLoading: Box
-    private let processLoadingSpinner: Adw.Spinner
+    private let processLoadingSpinner: Spinner
     private let processLoadingLabel: Label
     private let processContent: Box
     private let processError: Box
@@ -54,7 +54,7 @@ final class TargetPicker {
     private let appSearchEntry: SearchEntry
     private let appStatus: Label
     private let appLoading: Box
-    private let appLoadingSpinner: Adw.Spinner
+    private let appLoadingSpinner: Spinner
     private let appLoadingLabel: Label
     private let appContent: Box
     private let appError: Box
@@ -144,7 +144,7 @@ final class TargetPicker {
         processList = ListBox()
         processStatus = Label(str: "Select a device to list processes\u{2026}")
         processLoading = Box(orientation: .vertical, spacing: 8)
-        processLoadingSpinner = Adw.Spinner()
+        processLoadingSpinner = makeSpinner()
         processLoadingLabel = Label(str: "Enumerating processes\u{2026}")
         processContent = Box(orientation: .vertical, spacing: 0)
         processError = Box(orientation: .vertical, spacing: 8)
@@ -172,7 +172,7 @@ final class TargetPicker {
         appSearchEntry = SearchEntry()
         appStatus = Label(str: "Select a device to list applications\u{2026}")
         appLoading = Box(orientation: .vertical, spacing: 8)
-        appLoadingSpinner = Adw.Spinner()
+        appLoadingSpinner = makeSpinner()
         appLoadingLabel = Label(str: "Enumerating applications\u{2026}")
         appContent = Box(orientation: .vertical, spacing: 0)
         appError = Box(orientation: .vertical, spacing: 8)
