@@ -60,6 +60,7 @@ struct TargetPickerView: View {
     @State private var appEnvExpanded: Bool = false
     @State private var appWorkingDirExpanded: Bool = false
     @State private var appExecutionExpanded: Bool = false
+    @State private var appOptionsExpanded: Bool = false
 
     @State private var programPath: String = ""
     @State private var isShowingProgramBrowser: Bool = false
@@ -210,7 +211,7 @@ struct TargetPickerView: View {
                 .navigationTitle("New Session")
                 .toolbar { sharedToolbar }
             }
-            .frame(minWidth: isCompactWidth ? 0 : 904, minHeight: isCompactWidth ? 0 : 400)
+            .frame(minWidth: isCompactWidth ? 0 : 904, minHeight: isCompactWidth ? 0 : 560)
             .sheet(isPresented: $showingAddRemoteSheet) {
                 addRemoteSheet()
             }
@@ -342,8 +343,21 @@ struct TargetPickerView: View {
 
     @ViewBuilder
     private func spawnHeader() -> some View {
-        HStack {
-            Spacer()
+        HStack(spacing: 12) {
+            if spawnSubmode == .application && !applications.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Filter by name or identifier", text: $applicationSearchText)
+                        .textFieldStyle(.roundedBorder)
+                        .disableAutocorrection(true)
+                        #if canImport(UIKit)
+                            .textInputAutocapitalization(.never)
+                        #endif
+                }
+            } else {
+                Spacer()
+            }
 
             Picker("Launch", selection: $spawnSubmode) {
                 Text("Application").tag(SpawnSubmode.application)
@@ -352,7 +366,9 @@ struct TargetPickerView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 260)
         }
-        .padding([.horizontal, .top])
+        .padding(.horizontal)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -413,22 +429,6 @@ struct TargetPickerView: View {
         } else {
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-
-                        TextField("Filter by name or identifier", text: $applicationSearchText)
-                            .textFieldStyle(.roundedBorder)
-                            .disableAutocorrection(true)
-                            #if canImport(UIKit)
-                                .textInputAutocapitalization(.never)
-                            #endif
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-
-                    Divider()
-
                     List(filteredApplications, id: \.identifier) { app in
                         Button {
                             selectedApplicationIdentifier = app.identifier
@@ -481,8 +481,29 @@ struct TargetPickerView: View {
 
                 Divider()
 
-                Form {
-                    Section(isExpanded: $appArgumentsExpanded) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        appOptionsExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .rotationEffect(.degrees(appOptionsExpanded ? 90 : 0))
+                            .foregroundStyle(.secondary)
+                        Text("Options")
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+
+                if appOptionsExpanded {
+                    Divider()
+                    Form {
+                        Section(isExpanded: $appArgumentsExpanded) {
                         TextField("Arguments (optional)", text: $appArgumentsText, axis: .vertical)
                             .lineLimit(1...3)
                         Text("Arguments can be passed to apps too, but are not supported on all targets.")
@@ -528,8 +549,9 @@ struct TargetPickerView: View {
                     } header: {
                         Text("Execution")
                     }
+                    }
+                    .formStyle(.grouped)
                 }
-                .formStyle(.grouped)
             }
         }
     }
