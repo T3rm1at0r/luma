@@ -316,6 +316,10 @@ final class ITraceDetailView {
                     liveNode: engine.node(forSessionID: sessionID)
                 )
             }
+            if decoded.functionCalls.isEmpty {
+                appendEmptyCFGState(isRecording: trace.isRunning)
+                return
+            }
             let timeline = ITraceTimeline(
                 functionCalls: decoded.functionCalls,
                 totalEntryCount: decoded.entries.count
@@ -331,7 +335,7 @@ final class ITraceDetailView {
             bodyContainer.append(child: timeline.widget)
             populateEntries(decoded.entries)
             bodyContainer.append(child: entriesScroll)
-            if let existingCFG = cfgView, !decoded.functionCalls.isEmpty {
+            if let existingCFG = cfgView {
                 existingCFG.update(decoded: decoded)
                 bodyContainer.append(child: existingCFG.widget)
             } else {
@@ -339,6 +343,33 @@ final class ITraceDetailView {
             }
             applyMode()
         }
+    }
+
+    private func appendEmptyCFGState(isRecording: Bool) {
+        let empty = Box(orientation: .vertical, spacing: 8)
+        empty.halign = .center
+        empty.valign = .center
+        empty.hexpand = true
+        empty.vexpand = true
+
+        let icon = Gtk.Image(iconName: isRecording ? "media-record-symbolic" : "view-grid-symbolic")
+        icon.pixelSize = 32
+        if isRecording { icon.add(cssClass: "error") } else { icon.add(cssClass: "dim-label") }
+        empty.append(child: icon)
+
+        let title = Label(str: isRecording ? "Recording\u{2026}" : "No control-flow data")
+        title.add(cssClass: "title-4")
+        empty.append(child: title)
+
+        let detail = Label(str: isRecording
+            ? "Waiting for the first executed instructions to arrive."
+            : "This trace finished without capturing any executed instructions.")
+        detail.add(cssClass: "dim-label")
+        detail.wrap = true
+        detail.justify = .center
+        empty.append(child: detail)
+
+        bodyContainer.append(child: empty)
     }
 
     private func toggleMode() {

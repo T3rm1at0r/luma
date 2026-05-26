@@ -114,10 +114,16 @@ struct ITraceDetailView: View {
                                 selectedCallIndex = target
                             }
                         )
+                    } else {
+                        emptyCFGState(isRecording: liveTrace.isRunning)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                emptyCFGState(isRecording: liveTrace.isRunning)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { decodeTrace() }
         .onChange(of: liveTrace.dataSize) { _, newSize in
             scheduleRedecodeIfNeeded(currentSize: newSize)
@@ -238,6 +244,24 @@ struct ITraceDetailView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private func emptyCFGState(isRecording: Bool) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: isRecording ? "record.circle" : "square.on.square.dashed")
+                .font(.system(size: 32))
+                .foregroundStyle(isRecording ? .red : .secondary)
+            Text(isRecording ? "Recording…" : "No control-flow data")
+                .font(.headline)
+            Text(isRecording
+                ? "Waiting for the first executed instructions to arrive."
+                : "This trace finished without capturing any executed instructions.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func instructionList(_ decoded: DecodedITrace) -> some View {
