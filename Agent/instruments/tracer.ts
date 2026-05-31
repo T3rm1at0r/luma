@@ -103,15 +103,22 @@ class Tracer {
             const existing = hooks.get(hookConfig.id);
             if (existing !== undefined) {
                 const config = existing[1];
-                if (config.code === hookConfig.code &&
-                    config.state === hookConfig.state &&
-                    JSON.stringify(config.itraceArming ?? null) === JSON.stringify(hookConfig.itraceArming ?? null) &&
-                    JSON.stringify(config.addressAnchor) === JSON.stringify(hookConfig.addressAnchor)) {
+                // A hook's target address can't change via update_tracer_hook/edit_tracer_hook
+                // (only its code/state/itraceArming can), so the interceptor attachment never
+                // needs to move. Reconcile in place whenever the handler code and enabled-state
+                // are unchanged — re-attaching would make the interceptor relocate its own live
+                // redirect as if it were the original prologue, dereferencing the function's own
+                // bytes as a pointer (crash). The handler reads hook config fresh on every call,
+                // so swapping it in place is sufficient. (Deliberately not comparing addressAnchor:
+                // it is immutable for an existing id and re-serialization can spuriously differ.)
+                const attachmentUnchanged =
+                    config.code === hookConfig.code &&
+                    config.state === hookConfig.state;
+                if (attachmentUnchanged) {
+                    existing[1] = hookConfig;
                     continue;
                 }
-            }
 
-            if (existing !== undefined) {
                 existing[0]();
                 hooks.delete(hookConfig.id);
             }
@@ -144,12 +151,25 @@ class Tracer {
             return this.#attachJavaHook(hookConfig, hookConfig.addressAnchor, handler);
         }
 
-        const target = resolveAnchor(hookConfig.addressAnchor);
-        if (target === null) {
+        const resolved = resolveAnchor(hookConfig.addressAnchor);
+        if (resolved === null) {
             throw new Error("Could not resolve target");
         }
+        const target = resolved.strip();
 
         this.#hookTargets.set(hookConfig.id, target);
+
+        // Snapshot the pristine prologue before the interceptor redirects the entry, so itrace
+        // arming can hand the original bytes to the backend even when arming is toggled on after
+        // the hook is already live. Captured once per target so a later re-attach never overwrites
+        // it with an already-redirected prologue.
+        const targetKey = target.toString();
+        if (!this.#prologueBackups.has(targetKey)) {
+            const backup = target.readByteArray(64);
+            if (backup !== null) {
+                this.#prologueBackups.set(targetKey, backup);
+            }
+        }
 
         if (typeof handler === "function") {
             return this.#attachNativeInstructionHook(hookConfig, target, handler);
@@ -158,13 +178,6 @@ class Tracer {
     }
 
     #attachNativeFunctionHook(hookConfig: TracerHookConfig, target: NativePointer, handlers: FunctionHandlers): FunctionHook {
-        if (hookConfig.itraceArming !== undefined) {
-            const backup = target.readByteArray(64);
-            if (backup !== null) {
-                this.#prologueBackups.set(target.toString(), backup);
-            }
-        }
-
         const hook: FunctionHook = [
             () => { },
             hookConfig,
