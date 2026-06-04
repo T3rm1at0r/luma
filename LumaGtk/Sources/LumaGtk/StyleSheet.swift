@@ -165,6 +165,10 @@ enum StyleSheet {
         font-weight: 500;
     }
 
+    .luma-welcome-actions row {
+        padding: 8px 6px;
+    }
+
     .luma-wordmark-trail {
         min-height: 1.5px;
         min-width: 200px;

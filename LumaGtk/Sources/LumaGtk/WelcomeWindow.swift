@@ -220,6 +220,7 @@ final class WelcomeWindow {
 
     private func makeQuickActions() -> Widget {
         quickActionsList.add(cssClass: "boxed-list")
+        quickActionsList.add(cssClass: "luma-welcome-actions")
         quickActionsList.selectionMode = .none
 
         appendQuickAction(
