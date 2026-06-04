@@ -6,6 +6,7 @@ public enum LLMCapability: String, Sendable, Hashable, CaseIterable, Codable {
     case thinking
     case toolUse
     case apiKey
+    case optionalAPIKey
     case customBaseURL
 }
 

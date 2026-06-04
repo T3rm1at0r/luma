@@ -43,6 +43,8 @@ final class NewMissionDialog {
     private var checkingAPIKey: Bool = false
     private var isStarting: Bool = false
     private var apiKeyDebounce: Task<Void, Never>?
+    private var baseURLDebounce: Task<Void, Never>?
+    private var modelsLoadGeneration = 0
     private var reasoningEffortOptions: [String] = []
     private var selectedReasoningEffort: String
 
@@ -169,6 +171,8 @@ final class NewMissionDialog {
                 guard idx >= 0, idx < self.providerIDs.count else { return }
                 self.selectedProviderID = self.providerIDs[idx]
                 self.apiKeyEntry.text = ""
+                self.baseURLEntry.text = LumaAppState.shared.providerBaseURL(providerID: self.selectedProviderID) ?? ""
+                self.baseURLDebounce?.cancel()
                 self.applyProviderSelection(animatePicker: true)
             }
         }
@@ -201,8 +205,8 @@ final class NewMissionDialog {
                 self?.scheduleAPIKeyRefresh()
             }
         }
-        baseURLEntry.onActivate { [weak self] _ in
-            MainActor.assumeIsolated { self?.applyProviderSelection(animatePicker: true) }
+        baseURLEntry.onChanged { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleBaseURLRefresh() }
         }
         if let buffer = goalView.buffer {
             buffer.onChanged { [weak self] _ in
@@ -429,14 +433,11 @@ final class NewMissionDialog {
         let supportsCustomBaseURL = descriptor.capabilities.supports(.customBaseURL)
         baseURLRow.visible = supportsCustomBaseURL
         if supportsCustomBaseURL {
-            let stored = LumaAppState.shared.providerBaseURL(providerID: selectedProviderID) ?? ""
-            if (baseURLEntry.text ?? "") != stored {
-                baseURLEntry.text = stored
-            }
             baseURLEntry.placeholderText = descriptor.defaultBaseURL.absoluteString
         }
         let configuredBaseURL = effectiveBaseURL()
         let requiresKey = descriptor.capabilities.supports(.apiKey)
+        let supportsKey = requiresKey || descriptor.capabilities.supports(.optionalAPIKey)
         let typedKey = trimmedAPIKey
 
         reasoningEffortOptions = descriptor.capabilities.reasoningEffortOptions
@@ -449,7 +450,10 @@ final class NewMissionDialog {
             let idx = reasoningEffortOptions.firstIndex(of: selectedReasoningEffort) ?? 0
             setDropdownLabels(reasoningDropdown, labels: reasoningEffortOptions, selectedIndex: idx)
         }
-        apiKeyEntry.placeholderText = "API key for \(descriptor.displayName)"
+        apiKeyEntry.placeholderText =
+            requiresKey
+            ? "API key for \(descriptor.displayName)"
+            : "API key for \(descriptor.displayName) (optional)"
 
         thinkingSection.visible = !hasReasoningOptions && descriptor.capabilities.supports(.thinking)
         if !thinkingSection.visible {
@@ -463,7 +467,7 @@ final class NewMissionDialog {
         apiKeyOnFile.visible = false
         apiKeyRow.visible = false
 
-        if requiresKey {
+        if supportsKey {
             checkingAPIKey = true
             apiKeyChecking.visible = true
         } else {
@@ -473,19 +477,21 @@ final class NewMissionDialog {
 
         let providerID = selectedProviderID
         let credentials = engine.llmCredentials
+        modelsLoadGeneration += 1
+        let generation = modelsLoadGeneration
         Task { @MainActor [weak self] in
             guard let self else { return }
             let storedKey = (try? await credentials.apiKey(providerID: providerID)) ?? nil
             let hasStored = (storedKey?.isEmpty == false)
-            guard self.selectedProviderID == providerID else { return }
-            self.applyAPIKeyStatus(requiresKey: requiresKey, hasStored: hasStored)
+            guard self.modelsLoadGeneration == generation else { return }
+            self.applyAPIKeyStatus(supportsKey: supportsKey, hasStored: hasStored)
 
             let effectiveKey = !typedKey.isEmpty ? typedKey : storedKey
             let models: [LLMModelInfo]
             do {
                 models = try await provider.suggestedModels(apiKey: effectiveKey, baseURL: configuredBaseURL)
             } catch {
-                guard self.selectedProviderID == providerID else { return }
+                guard self.modelsLoadGeneration == generation else { return }
                 let hadKey = effectiveKey?.isEmpty == false
                 let label: String
                 if requiresKey && !hadKey {
@@ -497,13 +503,14 @@ final class NewMissionDialog {
                 self.refreshStartSensitivity()
                 return
             }
-            guard self.selectedProviderID == providerID else { return }
+            guard self.modelsLoadGeneration == generation else { return }
             self.installModels(models, descriptor: descriptor)
             if !typedKey.isEmpty, !hasStored {
                 try? await credentials.setAPIKey(typedKey, providerID: providerID)
-                guard self.selectedProviderID == providerID else { return }
-                self.applyAPIKeyStatus(requiresKey: requiresKey, hasStored: true)
+                guard self.modelsLoadGeneration == generation else { return }
+                self.applyAPIKeyStatus(supportsKey: supportsKey, hasStored: true)
                 self.apiKeyEntry.text = ""
+                self.apiKeyDebounce?.cancel()
             }
             self.refreshStartSensitivity()
         }
@@ -518,14 +525,70 @@ final class NewMissionDialog {
         apiKeyDebounce = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             if Task.isCancelled { return }
-            self?.applyProviderSelection(animatePicker: true)
+            self?.reloadModels(persistTypedKeyOnSuccess: true)
         }
     }
 
-    private func applyAPIKeyStatus(requiresKey: Bool, hasStored: Bool) {
+    private func scheduleBaseURLRefresh() {
+        baseURLDebounce?.cancel()
+        baseURLDebounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            if Task.isCancelled { return }
+            guard let self else { return }
+            let text = (self.baseURLEntry.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            LumaAppState.shared.setProviderBaseURL(text, providerID: self.selectedProviderID)
+            self.reloadModels()
+        }
+    }
+
+    private func reloadModels(persistTypedKeyOnSuccess: Bool = false) {
+        guard let engine, let provider = engine.llmRegistry.provider(id: selectedProviderID) else {
+            return
+        }
+        let descriptor = provider.descriptor
+        let configuredBaseURL = effectiveBaseURL()
+        let requiresKey = descriptor.capabilities.supports(.apiKey)
+        let typedKey = trimmedAPIKey
+
+        modelsForProvider = []
+        setDropdownLabels(modelDropdown, labels: ["Loading…"], selectedIndex: 0)
+
+        let providerID = selectedProviderID
+        let credentials = engine.llmCredentials
+        modelsLoadGeneration += 1
+        let generation = modelsLoadGeneration
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let storedKey = (try? await credentials.apiKey(providerID: providerID)) ?? nil
+            let effectiveKey = !typedKey.isEmpty ? typedKey : storedKey
+            do {
+                let models = try await provider.suggestedModels(apiKey: effectiveKey, baseURL: configuredBaseURL)
+                guard self.modelsLoadGeneration == generation else { return }
+                self.installModels(models, descriptor: descriptor)
+                if persistTypedKeyOnSuccess, !typedKey.isEmpty {
+                    try? await credentials.setAPIKey(typedKey, providerID: providerID)
+                    guard self.modelsLoadGeneration == generation else { return }
+                    self.applyAPIKeyStatus(supportsKey: true, hasStored: true)
+                    self.apiKeyEntry.text = ""
+                    self.apiKeyDebounce?.cancel()
+                }
+            } catch {
+                guard self.modelsLoadGeneration == generation else { return }
+                let hadKey = effectiveKey?.isEmpty == false
+                let label =
+                    requiresKey && !hadKey
+                    ? "Enter API key to load models"
+                    : describeModelFetchError(error, baseURL: configuredBaseURL ?? descriptor.defaultBaseURL)
+                self.setDropdownLabels(self.modelDropdown, labels: [label], selectedIndex: 0)
+            }
+            self.refreshStartSensitivity()
+        }
+    }
+
+    private func applyAPIKeyStatus(supportsKey: Bool, hasStored: Bool) {
         checkingAPIKey = false
         apiKeyChecking.visible = false
-        guard requiresKey else {
+        guard supportsKey else {
             apiKeyRow.visible = false
             apiKeyOnFile.visible = false
             hasStoredAPIKey = false
@@ -603,6 +666,13 @@ final class NewMissionDialog {
             ?? false
     }
 
+    private var currentProviderSupportsKey: Bool {
+        guard let capabilities = engine?.llmRegistry.provider(id: selectedProviderID)?.descriptor.capabilities else {
+            return false
+        }
+        return capabilities.supports(.apiKey) || capabilities.supports(.optionalAPIKey)
+    }
+
     private func start() {
         guard let engine else { return }
         let goal = trimmedGoal
@@ -626,7 +696,7 @@ final class NewMissionDialog {
         let parent = self.parentWindow
         _ = parent
         let dialog = self.dialog
-        let needsKey = currentProviderRequiresKey && !hasStoredAPIKey
+        let needsKey = currentProviderSupportsKey && !hasStoredAPIKey
         let providedKey = trimmedAPIKey
 
         Task { @MainActor in

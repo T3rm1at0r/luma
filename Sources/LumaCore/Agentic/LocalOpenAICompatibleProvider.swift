@@ -16,7 +16,7 @@ public struct LocalOpenAICompatibleProvider: LLMProvider {
             id: Self.providerID,
             displayName: "Local (OpenAI-compatible)",
             capabilities: LLMProviderCapabilities(
-                supported: [.streaming, .toolUse, .customBaseURL]
+                supported: [.streaming, .toolUse, .customBaseURL, .optionalAPIKey]
             ),
             defaultModelID: nil,
             summarizationModelID: nil,
