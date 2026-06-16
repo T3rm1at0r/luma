@@ -214,8 +214,25 @@ if (Test-Path $adwaitaSrc) { Remove-Item -Recurse -Force $adwaitaSrc }
 # puts MSYS2's bin (with GNU tar) ahead on PATH for sed/awk, and
 # GNU tar reads the "D:" in a Windows path as a remote rcp host.
 Write-Host "[stage]   extracting Adwaita tarball"
-& "$env:SystemRoot\System32\tar.exe" -xJf $adwaitaTar -C $OutputDir
-if ($LASTEXITCODE -ne 0) { throw "Failed to extract $adwaitaTar" }
+# Adwaita ships one relative symlink (folder-drag-accept-symbolic.svg
+# -> folder-symbolic.svg); creating a symlink on Windows needs a
+# privilege the runner lacks, and bsdtar stalls on it indefinitely.
+# Exclude it (the icon falls back to folder-symbolic anyway). Run via
+# Start-Process with a hard cap so a wedged extract can't hang the
+# build and tar's stderr can't deadlock the PowerShell pipe.
+$tarOut = [System.IO.Path]::GetTempFileName()
+$tarErr = [System.IO.Path]::GetTempFileName()
+$tarProc = Start-Process -FilePath "$env:SystemRoot\System32\tar.exe" `
+    -ArgumentList '-xJf', $adwaitaTar, '-C', $OutputDir, '--exclude', '*/folder-drag-accept-symbolic.svg' `
+    -NoNewWindow -PassThru -RedirectStandardOutput $tarOut -RedirectStandardError $tarErr
+if (-not $tarProc.WaitForExit(120000)) {
+    $tarProc.Kill()
+    throw "Adwaita extraction hung (>120s)"
+}
+$tarExit = $tarProc.ExitCode
+Get-Content $tarErr -ErrorAction SilentlyContinue | Where-Object { $_ } | ForEach-Object { Write-Host "  tar: $_" }
+Remove-Item $tarOut, $tarErr -ErrorAction SilentlyContinue
+if ($tarExit -ne 0) { throw "Failed to extract $adwaitaTar (exit $tarExit)" }
 $adwaitaDest = Join-Path $stage 'share\icons\Adwaita'
 New-Item -ItemType Directory -Force -Path $adwaitaDest | Out-Null
 Copy-Item (Join-Path $adwaitaSrc 'index.theme') $adwaitaDest
