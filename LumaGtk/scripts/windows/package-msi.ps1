@@ -127,12 +127,16 @@ $dllSearchPath = @(
 # runtime we ship anyway. First search path wins on name clashes,
 # matching the old closure-walk order.
 foreach ($dir in $dllSearchPath) {
-    Get-ChildItem -Path $dir -Filter *.dll -File | ForEach-Object {
-        $target = Join-Path $stage $_.Name
+    $dlls = @(Get-ChildItem -Path $dir -Filter *.dll -File)
+    Write-Host "[stage] $($dlls.Count) DLLs from $dir"
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    foreach ($dll in $dlls) {
+        $target = Join-Path $stage $dll.Name
         if (-not (Test-Path $target)) {
-            Copy-Item $_.FullName $target
+            Copy-Item $dll.FullName $target
         }
     }
+    Write-Host "[stage]   done in $([int]$sw.Elapsed.TotalSeconds)s"
 }
 
 # frida-core loads its per-arch agent and helper at runtime from
@@ -141,6 +145,7 @@ foreach ($dir in $dllSearchPath) {
 # walk above misses them — stage them explicitly, but omit the
 # gadget DLLs (they're for launch-time injection into third-party
 # apps and unused by Luma).
+Write-Host "[stage] frida-1.0"
 $fridaLib = Join-Path $env:FRIDA_PREFIX 'lib\frida-1.0'
 if (Test-Path $fridaLib) {
     $fridaStage = Join-Path $stage 'frida-1.0'
@@ -157,6 +162,7 @@ function Copy-Tree {
     if (-not (Test-Path $From)) { return }
     robocopy $From $To /E /NFL /NDL /NJH /NJS /NP /XO | Out-Null
 }
+Write-Host "[stage] GTK data (schemas/icons)"
 Copy-Tree (Join-Path $env:VCPKG_PREFIX 'share\glib-2.0\schemas') (Join-Path $stage 'share\glib-2.0\schemas')
 Copy-Tree (Join-Path $env:VCPKG_PREFIX 'share\icons')            (Join-Path $stage 'share\icons')
 Copy-Tree (Join-Path $pkg 'data\icons\hicolor')                  (Join-Path $stage 'share\icons\hicolor')
@@ -175,6 +181,7 @@ Copy-Tree (Join-Path $pkg 'data\icons\hicolor')                  (Join-Path $sta
 # giognutls.dll, and GIO picks the first backend it finds — copy it
 # by accident and you trade Windows' system trust store for whatever
 # CA bundle gnutls happens to find (usually nothing).
+Write-Host "[stage] glib-networking TLS module"
 $gioOpenssl = Join-Path $env:VCPKG_PREFIX 'plugins\glib-networking\gioopenssl.dll'
 if (-not (Test-Path $gioOpenssl)) {
     throw "gioopenssl.dll not found at $gioOpenssl. Without it libsoup cannot talk TLS. Check that vcpkg built glib-networking with the openssl feature."
@@ -189,6 +196,7 @@ Copy-Item $gioOpenssl $gioModulesStage -Force
 # libadwaita falls back to this theme when it can't resolve a name
 # from its own GResource bundle. Skip cursors/ — 15 MB of X bitmap
 # cursors that Windows can't use.
+Write-Host "[stage] Adwaita icon theme"
 $adwaitaVersion = '50.0'
 $adwaitaSha256  = 'fac6e0401fca714780561a081b8f7e27c3bc1db34ebda4da175081f26b24d460'
 $adwaitaUrl     = "https://download.gnome.org/sources/adwaita-icon-theme/50/adwaita-icon-theme-$adwaitaVersion.tar.xz"
@@ -205,6 +213,7 @@ if (Test-Path $adwaitaSrc) { Remove-Item -Recurse -Force $adwaitaSrc }
 # Invoke Windows' libarchive tar.exe by full path: setup-env.ps1
 # puts MSYS2's bin (with GNU tar) ahead on PATH for sed/awk, and
 # GNU tar reads the "D:" in a Windows path as a remote rcp host.
+Write-Host "[stage]   extracting Adwaita tarball"
 & "$env:SystemRoot\System32\tar.exe" -xJf $adwaitaTar -C $OutputDir
 if ($LASTEXITCODE -ne 0) { throw "Failed to extract $adwaitaTar" }
 $adwaitaDest = Join-Path $stage 'share\icons\Adwaita'
@@ -216,6 +225,7 @@ Copy-Tree (Join-Path $adwaitaSrc 'Adwaita\symbolic') (Join-Path $adwaitaDest 'sy
 
 # Compile the GLib schema XMLs so GTK can actually use them, then
 # drop the source XMLs — only gschemas.compiled is read at runtime.
+Write-Host "[stage] compiling GLib schemas"
 $schemasDir = Join-Path $stage 'share\glib-2.0\schemas'
 if (Test-Path $schemasDir) {
     $compiler = Join-Path $env:VCPKG_PREFIX 'tools\glib\glib-compile-schemas.exe'
@@ -239,6 +249,7 @@ $msiName = "Luma-$Version-$Arch.msi"
 $wixObj  = Join-Path $OutputDir 'wixobj'
 New-Item -ItemType Directory -Force -Path $wixObj | Out-Null
 
+Write-Host "[stage] harvesting stage with heat"
 $componentsWxs = Join-Path $wixObj 'components.wxs'
 & $heat dir $stage -cg LumaComponents -gg -sfrag -srd -scom -sreg `
     -dr INSTALLDIR -var var.StageDir -out $componentsWxs
