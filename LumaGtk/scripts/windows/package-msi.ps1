@@ -122,19 +122,37 @@ $dllSearchPath = @(
 $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
 if (-not $dumpbin) { throw "dumpbin.exe not on PATH. Run from a Developer PowerShell for VS." }
 
+function Get-DllDependents {
+    param([string] $Binary)
+    $out = [System.IO.Path]::GetTempFileName()
+    $err = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process -FilePath $dumpbin.Path -ArgumentList '/DEPENDENTS', $Binary `
+            -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        if (-not $proc.WaitForExit(60000)) {
+            $proc.Kill()
+            Write-Host "WARNING: dumpbin /DEPENDENTS hung on $Binary (>60s); skipping its dependents"
+            return @()
+        }
+        Get-Content $out | ForEach-Object {
+            if ($_ -match '^\s+([^\s].*\.dll)\s*$') { $Matches[1] }
+        }
+    } finally {
+        Remove-Item $out, $err -ErrorAction SilentlyContinue
+    }
+}
+
 $seen = @{}
 function Add-DllClosure {
     param([string] $Binary)
-    $deps = & $dumpbin.Path /DEPENDENTS $Binary 2>$null | ForEach-Object {
-        if ($_ -match '^\s+([^\s].*\.dll)\s*$') { $Matches[1] }
-    }
-    foreach ($dep in $deps) {
+    foreach ($dep in (Get-DllDependents $Binary)) {
         $key = $dep.ToLowerInvariant()
         if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
         foreach ($dir in $dllSearchPath) {
             $path = Join-Path $dir $dep
             if (Test-Path $path) {
-                $seen[$key] = $path
+                Write-Host "  staging $dep"
                 Copy-Item $path (Join-Path $stage $dep) -Force
                 Add-DllClosure $path
                 break
