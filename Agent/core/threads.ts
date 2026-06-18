@@ -11,14 +11,9 @@ export function getThreadSnapshot(id: ThreadId): ThreadSnapshot | null {
         return null;
     }
 
-    const registers: Array<[string, string]> = [];
-    for (const [key, value] of Object.entries(details.context)) {
-        if (typeof value === "number") {
-            registers.push([key, "0x" + (value >>> 0).toString(16)]);
-        } else if (value !== null && value !== undefined) {
-            registers.push([key, value.toString()]);
-        }
-    }
+    const context = details.context as unknown as { toJSON(): Record<string, NativePointer> };
+    const registers: Array<[string, string]> = Object.entries(context.toJSON())
+        .map(([name, value]) => [name, value.toString()]);
 
     return {
         id: details.id,
