@@ -113,22 +113,27 @@ enum SessionDetachedBanner {
 
         let icon = Image(iconName: iconName)
         icon.pixelSize = 16
+        icon.valign = .center
         leading.append(child: icon)
 
         let nameLabel = Label(str: processName)
         nameLabel.add(cssClass: "heading")
         nameLabel.xalign = 0
+        nameLabel.valign = .center
         leading.append(child: nameLabel)
 
         if let message {
             let divider = Box(orientation: .vertical, spacing: 0)
             divider.add(cssClass: "luma-banner-divider")
+            divider.valign = .center
+            divider.setSizeRequest(width: 1, height: 16)
             leading.append(child: divider)
 
             let messageLabel = Label(str: message)
             messageLabel.add(cssClass: "caption")
             messageLabel.add(cssClass: "dim-label")
             messageLabel.xalign = 0
+            messageLabel.valign = .center
             messageLabel.wrap = true
             messageLabel.hexpand = true
             leading.append(child: messageLabel)
