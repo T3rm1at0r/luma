@@ -11,9 +11,9 @@ export function getThreadSnapshot(id: ThreadId): ThreadSnapshot | null {
         return null;
     }
 
-    const context = details.context as unknown as { toJSON(): Record<string, NativePointer> };
+    const context = details.context as unknown as { toJSON(): Record<string, RegisterValue> };
     const registers: Array<[string, string]> = Object.entries(context.toJSON())
-        .map(([name, value]) => [name, value.toString()]);
+        .map(([name, value]) => [name, formatRegisterValue(value)]);
 
     return {
         id: details.id,
@@ -21,6 +21,20 @@ export function getThreadSnapshot(id: ThreadId): ThreadSnapshot | null {
         state: details.state,
         registers,
     };
+}
+
+type RegisterValue = NativePointer | ArrayBuffer | number;
+
+function formatRegisterValue(value: RegisterValue): string {
+    if (value instanceof ArrayBuffer) {
+        return vectorToHex(value);
+    }
+    return value.toString();
+}
+
+function vectorToHex(buffer: ArrayBuffer): string {
+    const bytes = Array.from(new Uint8Array(buffer)).reverse();
+    return "0x" + bytes.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 type ThreadEventBatchMessage = {
