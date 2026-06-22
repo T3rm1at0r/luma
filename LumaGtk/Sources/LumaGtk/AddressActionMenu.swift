@@ -39,10 +39,10 @@ enum AddressActionMenu {
     ) {
         let inspectSection: [ContextMenu.Item] = [
             .init("Open Disassembly") {
-                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .disassembly, failureLabel: "Can\u{2019}t open disassembly")
+                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .disassembly, preferredAnchor: context.anchorHint, failureLabel: "Can\u{2019}t open disassembly")
             },
             .init("Open Memory") {
-                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .memory, failureLabel: "Can\u{2019}t open memory")
+                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .memory, preferredAnchor: context.anchorHint, failureLabel: "Can\u{2019}t open memory")
             },
         ]
 
@@ -65,10 +65,11 @@ enum AddressActionMenu {
         sessionID: UUID,
         address: UInt64,
         kind: AddressInsight.Kind,
+        preferredAnchor: AddressAnchor? = nil,
         failureLabel: String
     ) {
         do {
-            let insight = try engine.getOrCreateInsight(sessionID: sessionID, pointer: address, kind: kind)
+            let insight = try engine.getOrCreateInsight(sessionID: sessionID, pointer: address, kind: kind, preferredAnchor: preferredAnchor)
             navigator?(sessionID, insight.id)
         } catch {
             errorReporter?("\(failureLabel): \(error.localizedDescription)")

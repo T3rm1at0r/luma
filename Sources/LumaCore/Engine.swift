@@ -3429,7 +3429,7 @@ public final class Engine {
 
         let displayName = preferredDisplayName?.isEmpty == false
             ? preferredDisplayName!
-            : anchor.displayString
+            : anchor.symbolName
         let hookCode = code ?? defaultTracerCode(kind: kind, anchor: anchor, displayName: displayName)
         let newHook = TracerConfig.Hook(
             id: UUID(),
@@ -4634,9 +4634,10 @@ public func deleteCustomInstrument(_ defID: UUID) async {
     public func getOrCreateInsight(
         sessionID: UUID,
         pointer: UInt64,
-        kind: AddressInsight.Kind
+        kind: AddressInsight.Kind,
+        preferredAnchor: AddressAnchor? = nil
     ) throws -> AddressInsight {
-        let anchor = anchor(sessionID: sessionID, address: pointer)
+        let anchor = preferredAnchor ?? anchor(sessionID: sessionID, address: pointer)
 
         let existing = (try? store.fetchInsights(sessionID: sessionID)) ?? []
         if let match = existing.first(where: { $0.kind == kind && $0.anchor == anchor }) {

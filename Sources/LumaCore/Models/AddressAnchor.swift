@@ -54,6 +54,17 @@ public enum AddressAnchor: Codable, Hashable, Sendable {
         }
     }
 
+    public var symbolName: String {
+        switch self {
+        case .moduleExport(_, let export):
+            return export
+        case .swiftFunc(_, let function):
+            return function
+        default:
+            return displayString
+        }
+    }
+
     public static func fromJSON(_ object: JSONObject) throws -> AddressAnchor {
         guard let type = object["type"] as? String else {
             throw LumaCoreError.invalidArgument("Anchor missing 'type'")

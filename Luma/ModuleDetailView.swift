@@ -78,13 +78,12 @@ struct ModuleDetailView: View {
             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
                 addressMenu(
                     address: row.address,
-                    title: row.name,
                     context: addressContext(for: row)
                 )
             }
         } primaryAction: { ids in
             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
-                openInsight(at: row.address, title: row.name, context: addressContext(for: row))
+                openInsight(at: row.address, context: addressContext(for: row))
             }
         }
     }
@@ -110,7 +109,6 @@ struct ModuleDetailView: View {
             {
                 addressMenu(
                     address: address,
-                    title: row.name,
                     context: addressContext(for: row)
                 )
             }
@@ -121,7 +119,6 @@ struct ModuleDetailView: View {
             {
                 openInsight(
                     at: address,
-                    title: row.name,
                     context: addressContext(for: row)
                 )
             }
@@ -146,13 +143,12 @@ struct ModuleDetailView: View {
             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
                 addressMenu(
                     address: row.address,
-                    title: row.name,
                     context: addressContext(for: row)
                 )
             }
         } primaryAction: { ids in
             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
-                openInsight(at: row.address, title: row.name, context: addressContext(for: row))
+                openInsight(at: row.address, context: addressContext(for: row))
             }
         }
     }
@@ -163,15 +159,15 @@ struct ModuleDetailView: View {
     }
 
     @ViewBuilder
-    private func addressMenu(address: UInt64, title: String, context: AddressContext) -> some View {
+    private func addressMenu(address: UInt64, context: AddressContext) -> some View {
         Button {
-            openInsight(at: address, title: title, kindOverride: .disassembly)
+            openInsight(at: address, context: context, kindOverride: .disassembly)
         } label: {
             Label("Open Disassembly", systemImage: "hammer")
         }
 
         Button {
-            openInsight(at: address, title: title, kindOverride: .memory)
+            openInsight(at: address, context: context, kindOverride: .memory)
         } label: {
             Label("Open Memory", systemImage: "doc.text.magnifyingglass")
         }
@@ -199,7 +195,6 @@ struct ModuleDetailView: View {
 
     private func openInsight(
         at address: UInt64,
-        title: String,
         context: AddressContext = AddressContext(),
         kindOverride: LumaCore.AddressInsight.Kind? = nil
     ) {
@@ -217,7 +212,8 @@ struct ModuleDetailView: View {
                 let insight = try engine.getOrCreateInsight(
                     sessionID: sessionID,
                     pointer: address,
-                    kind: kind
+                    kind: kind,
+                    preferredAnchor: context.anchorHint
                 )
                 selection = .insight(sessionID, insight.id)
             } catch {
