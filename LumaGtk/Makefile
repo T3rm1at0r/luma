@@ -23,11 +23,13 @@ AGENT_SOURCES := \
 
 bundle: $(AGENT_BUNDLE) $(TYPINGS_BUNDLE)
 
-$(AGENT_BUNDLE) $(TYPINGS_BUNDLE) &: $(AGENT_SOURCES) $(PROJECT_ROOT)/Agent/bundle.json
+$(AGENT_BUNDLE): $(AGENT_SOURCES) $(PROJECT_ROOT)/Agent/bundle.json
 	swift run --package-path $(PROJECT_ROOT) luma-bundle-compiler \
 	    --config       "$(PROJECT_ROOT)/Agent/bundle.json" \
 	    --project-root "$(PROJECT_ROOT)" \
 	    --staging-dir  "$(AGENT_STAGING)"
+
+$(TYPINGS_BUNDLE): $(AGENT_BUNDLE)
 
 build: bundle
 	swift build $(SWIFT_BUILD_FLAGS)
