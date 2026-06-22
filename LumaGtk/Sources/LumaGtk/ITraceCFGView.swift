@@ -23,7 +23,6 @@ final class ITraceCFGView {
     var onJumpToFunction: ((Int) -> Void)?
 
     private var decoded: DecodedITrace
-    private let arch: String
     private let windowRadius: Int
     private let disasmProvider: ((UInt64, Int) async -> StyledText)?
 
@@ -63,13 +62,11 @@ final class ITraceCFGView {
 
     init(
         decoded: DecodedITrace,
-        arch: String,
         selectedCallIndex: Int,
         windowRadius: Int = 10,
         disasmProvider: ((UInt64, Int) async -> StyledText)?
     ) {
         self.decoded = decoded
-        self.arch = arch
         self.selectedCallIndex = selectedCallIndex
         self.windowRadius = windowRadius
         self.disasmProvider = disasmProvider
@@ -1059,37 +1056,12 @@ final class ITraceCFGView {
             return RegEntry(index: idx, name: name, value: val)
         }
 
-        if arch == "arm64" {
-            let arm64GPROrder: [[String]] = [
-                ["x0", "x1", "x2", "x3"],
-                ["x4", "x5", "x6", "x7"],
-                ["x8", "x9", "x10", "x11"],
-                ["x12", "x13", "x14", "x15"],
-                ["x16", "x17", "x18", "x19"],
-                ["x20", "x21", "x22", "x23"],
-                ["x24", "x25", "x26", "x27"],
-                ["x28", "fp", "lr"],
-                ["sp", "pc", "nzcv"],
-            ]
-            let gpr = arm64GPROrder.compactMap { names -> [RegEntry]? in
-                let row = names.compactMap { entry($0) }
-                return row.isEmpty ? nil : row
-            }
+        func rows(_ names: [[String]]) -> [[RegEntry]] {
+            names.map { $0.compactMap(entry) }.filter { !$0.isEmpty }
+        }
 
-            var vec: [[RegEntry]] = []
-            var vecRow: [RegEntry] = []
-            for i in 0...31 {
-                if let e = entry("v\(i)") {
-                    vecRow.append(e)
-                    if vecRow.count == 4 {
-                        vec.append(vecRow)
-                        vecRow.removeAll()
-                    }
-                }
-            }
-            if !vecRow.isEmpty { vec.append(vecRow) }
-
-            return RegisterLayout(gpr: gpr, vec: vec)
+        if let grid = CpuRegisterLayout.arm64Grid(present: Set(nameToIdx.keys)) {
+            return RegisterLayout(gpr: rows(grid.gpr), vec: rows(grid.vector))
         }
 
         let sorted = values.keys.sorted()

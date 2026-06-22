@@ -138,22 +138,8 @@ public struct ThreadSnapshot: Sendable {
             regs.append(Register(name: key, rawValue: value))
         }
 
-        return ThreadSnapshot(id: UInt(rawID), name: name, state: state, registers: orderedRegisters(regs))
+        let order = CpuRegisterLayout.ordered(regs.map(\.name))
+        let byName = Dictionary(uniqueKeysWithValues: regs.map { ($0.name, $0) })
+        return ThreadSnapshot(id: UInt(rawID), name: name, state: state, registers: order.map { byName[$0]! })
     }
-
-    private static func orderedRegisters(_ regs: [Register]) -> [Register] {
-        let names = Set(regs.map(\.name))
-        guard names.contains("x0"), names.contains("nzcv") else { return regs }
-
-        let rank = Dictionary(uniqueKeysWithValues: arm64RegisterOrder.enumerated().map { ($1, $0) })
-        return regs.enumerated().sorted { lhs, rhs in
-            let lhsRank = rank[lhs.element.name] ?? arm64RegisterOrder.count + lhs.offset
-            let rhsRank = rank[rhs.element.name] ?? arm64RegisterOrder.count + rhs.offset
-            return lhsRank < rhsRank
-        }.map(\.element)
-    }
-
-    private static let arm64RegisterOrder: [String] =
-        (0...28).map { "x\($0)" } + ["fp", "lr", "sp", "pc", "nzcv"]
-        + (0...31).map { "q\($0)" } + (0...31).map { "d\($0)" } + (0...31).map { "s\($0)" }
 }

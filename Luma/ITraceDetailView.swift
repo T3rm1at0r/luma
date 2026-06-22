@@ -96,7 +96,6 @@ struct ITraceDetailView: View {
                             blockBytes: decoded.blockBytes,
                             nodeRegisterInfo: cfgNodeRegisterInfo,
                             registerNames: decoded.registerNames,
-                            arch: session.processInfo!.arch,
                             disasmProvider: disassembler.map { d in
                                 { [colorScheme] addr, size in
                                     await d.disassemble(at: addr, size: size, appearance: colorScheme == .dark ? .dark : .light, withFlags: false)
