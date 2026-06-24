@@ -365,6 +365,7 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
 
             await r2.setColorLimit(.mode16M)
 
+            await r2.config.set("log.quiet", bool: true)
             await r2.config.set("scr.utf8", bool: true)
             await r2.config.set("scr.color", colorMode: .mode16M)
             await r2.config.set("cfg.json.num", string: "hex")
