@@ -625,6 +625,10 @@ private struct REPLInputField: View {
                 parent.text = field.stringValue
             }
 
+            func controlTextDidEndEditing(_ obj: Notification) {
+                parent.isFocused = false
+            }
+
             func control(
                 _ control: NSControl,
                 textView: NSTextView,
