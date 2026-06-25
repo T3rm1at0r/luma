@@ -45,6 +45,7 @@ struct NotebookView: View {
                                 next: index < ordered.count - 1 ? ordered[index + 1] : nil,
                                 engine: engine,
                                 selection: $selection,
+                                autoBeginEditing: entry.id == lastInsertedID,
                                 onEditingChanged: { editing in
                                     if editing {
                                         editingEntryIDs.insert(entry.id)
@@ -159,6 +160,7 @@ struct NotebookEntryRow: View {
     let next: LumaCore.NotebookEntry?
     let engine: Engine
     @Binding var selection: SidebarItemID?
+    let autoBeginEditing: Bool
 
     let onEditingChanged: (Bool) -> Void
     let addNoteBelow: () -> Void
@@ -253,7 +255,7 @@ struct NotebookEntryRow: View {
         .onAppear {
             editTitle = entry.title
             editDetails = entry.details
-            if isNote && entry.details.isEmpty && entry.title.isEmpty {
+            if autoBeginEditing && isNote && entry.details.isEmpty && entry.title.isEmpty {
                 isEditingUserNote = true
                 DispatchQueue.main.async {
                     isTitleFocused = true
