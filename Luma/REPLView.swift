@@ -10,6 +10,13 @@ extension LumaCore.REPLLanguage {
         }
     }
 
+    var promptGlyph: String {
+        switch self {
+        case .javascript: return "\u{203A}"
+        case .r2: return "\u{00BB}"
+        }
+    }
+
     var promptColor: Color {
         switch self {
         case .javascript: return .orange
@@ -171,7 +178,7 @@ struct REPLView: View {
                 Button {
                     toggleMode()
                 } label: {
-                    Text("\(mode.promptLabel) ›")
+                    Text("\(mode.promptLabel) \(mode.promptGlyph)")
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(mode.promptColor)
                 }
@@ -483,7 +490,7 @@ private struct REPLCellView: View {
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(cell.language.promptLabel) ›")
+                    Text(cell.language.promptGlyph)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(cell.language.promptColor)
                     Text(DisplayTruncation.truncated(cell.code))

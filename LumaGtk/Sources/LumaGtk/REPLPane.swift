@@ -77,7 +77,7 @@ final class REPLPane {
     }
 
     private func applyMode() {
-        console.setPromptMarkup(Self.promptMarkup(for: mode))
+        console.setPromptMarkup(Self.promptMarkup(for: mode, withLabel: true))
         console.completionReplacesWholeToken = mode == .r2
     }
 
@@ -112,10 +112,11 @@ final class REPLPane {
         }
     }
 
-    private static func promptMarkup(for language: LumaCore.REPLLanguage) -> String {
+    private static func promptMarkup(for language: LumaCore.REPLLanguage, withLabel: Bool) -> String {
         let color = language == .r2 ? "#3584e4" : "#e5a50a"
-        let label = language == .r2 ? "r2" : "js"
-        return "<span foreground=\"\(color)\">\(label) \u{203A}</span>"
+        let glyph = language == .r2 ? "\u{00BB}" : "\u{203A}"
+        let content = withLabel ? "\(language == .r2 ? "r2" : "js") \(glyph)" : glyph
+        return "<span foreground=\"\(color)\">\(content)</span>"
     }
 
     func applySessionState() {
@@ -294,7 +295,7 @@ final class REPLPane {
         let prompt = Label(str: "")
         prompt.add(cssClass: "monospace")
         prompt.useMarkup = true
-        prompt.setMarkup(str: Self.promptMarkup(for: cell.language))
+        prompt.setMarkup(str: Self.promptMarkup(for: cell.language, withLabel: false))
         codeRow.append(child: prompt)
         let codeLabel = Label(str: DisplayTruncation.truncated(cell.code))
         codeLabel.add(cssClass: "monospace")
