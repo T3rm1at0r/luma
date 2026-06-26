@@ -176,16 +176,18 @@ public final class HexView {
         // Selection background pass
         if let range = selection {
             ctx.setSource(red: 0.22, green: 0.47, blue: 0.93, alpha: 0.30)
+            let selectionHeight = rowHeight - 1
+            let y0 = marginY - (selectionHeight - cellHeight) / 2
             for idx in range {
                 if idx >= bytes.count { break }
                 let r = idx / bytesPerRow
                 let c = idx % bytesPerRow
-                let y = marginY + Double(r) * rowHeight
+                let y = y0 + Double(r) * rowHeight
                 let hx = hexStart + Double(c) * (cellWidth + hexSpacing) - 1
-                ctx.rectangle(x: hx, y: y, width: cellWidth + 2, height: rowHeight - 1)
+                ctx.rectangle(x: hx, y: y, width: cellWidth + 2, height: selectionHeight)
                 ctx.fill()
                 let ax = asciiStart + Double(c) * asciiCellWidth
-                ctx.rectangle(x: ax, y: y, width: asciiCellWidth, height: rowHeight - 1)
+                ctx.rectangle(x: ax, y: y, width: asciiCellWidth, height: selectionHeight)
                 ctx.fill()
             }
         }
