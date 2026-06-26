@@ -335,13 +335,13 @@ private func renderBlockEntry(
 ) -> TurnBlockEntry {
     switch block.content {
     case .text(let text):
-        let label = MissionRichText.makeWrappedLabel(markdown: text)
-        return TurnBlockEntry(block: block, widget: label, toolBlock: nil)
+        let widget = MarkdownWidget.make(markdown: text)
+        return TurnBlockEntry(block: block, widget: widget, toolBlock: nil)
     case .thinking(let text, _):
         let widget = MissionDisclosure.make(
             title: "Thinking",
             iconName: "view-reveal-symbolic",
-            child: MissionRichText.makeWrappedLabel(markdown: text, dimmed: true)
+            child: MarkdownWidget.make(markdown: text, dimmed: true)
         )
         return TurnBlockEntry(block: block, widget: widget, toolBlock: nil)
     case .redactedThinking:

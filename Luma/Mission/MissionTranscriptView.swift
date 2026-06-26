@@ -104,10 +104,10 @@ private struct BlockView: View {
     var body: some View {
         switch block.content {
         case .text(let text):
-            Text(renderMarkdown(text)).textSelection(.enabled)
+            MarkdownView(text)
         case .thinking(let text, _):
             DisclosureGroup("Thinking") {
-                Text(renderMarkdown(text)).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                MarkdownView(text).font(.callout).foregroundStyle(.secondary)
             }
         case .redactedThinking:
             Text("[redacted thinking]").italic().foregroundStyle(.secondary)
@@ -175,7 +175,7 @@ private struct TurnLiveCard: View {
                 Text("Streaming…").font(.caption.weight(.semibold)).foregroundStyle(.blue)
                 Spacer()
             }
-            Text(renderMarkdown(text)).textSelection(.enabled)
+            MarkdownView(MarkdownStreaming.stablePrefix(of: text))
         }
         .padding()
         .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -204,17 +204,6 @@ private struct ActionStatusPill: View {
         case .failed: .red
         }
     }
-}
-
-private func renderMarkdown(_ text: String) -> AttributedString {
-    let options = AttributedString.MarkdownParsingOptions(
-        allowsExtendedAttributes: false,
-        interpretedSyntax: .inlineOnlyPreservingWhitespace
-    )
-    if let attributed = try? AttributedString(markdown: text, options: options) {
-        return attributed
-    }
-    return AttributedString(text)
 }
 
 private func prettyJSON(_ s: String) -> String {

@@ -385,9 +385,7 @@ struct NotebookEntryRow: View {
     @ViewBuilder
     private var readOnlyUserNoteBody: some View {
         if !entry.details.isEmpty {
-            Text(entry.details)
-                .font(.body)
-                .textSelection(.enabled)
+            MarkdownView(entry.details)
         }
     }
 
