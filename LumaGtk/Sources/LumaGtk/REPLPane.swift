@@ -344,7 +344,7 @@ final class REPLPane {
                 header.add(cssClass: "monospace")
                 header.halign = .start
                 column2.append(child: header)
-                let hex = HexView(bytes: data)
+                let hex = HexView(bytes: data, baseAddress: meta?.baseAddress ?? 0)
                 rowKeepers.append(hex)
                 hex.widget.hexpand = true
                 hex.widget.vexpand = false

@@ -2486,9 +2486,45 @@ public final class Engine {
         guard let disassembler = disassembler(forSessionID: sessionID) else {
             return .text("r2 is unavailable until the process is attached.")
         }
+        if let arguments = hexdumpArguments(command) {
+            let value = await hexdumpValue(forCommand: command, arguments: arguments, disassembler: disassembler)
+            await captureREPLSeek(disassembler: disassembler, sessionID: sessionID)
+            return value
+        }
         let result = await disassembler.runCommand(command)
         await captureREPLSeek(disassembler: disassembler, sessionID: sessionID)
         return replValue(forR2Result: result)
+    }
+
+    private func hexdumpArguments(_ command: String) -> String? {
+        let trimmed = command.trimmingCharacters(in: .whitespaces)
+        let token = trimmed.prefix(while: { !$0.isWhitespace })
+        guard token == "px" || token == "x" else { return nil }
+        return trimmed.dropFirst(token.count).trimmingCharacters(in: .whitespaces)
+    }
+
+    private func hexdumpValue(forCommand command: String, arguments: String, disassembler: Disassembler) async -> REPLResult.Value {
+        let bytes = await disassembler.runCommand("pxj \(arguments)")
+        guard let data = decodeR2ByteArray(bytes.output) else {
+            return replValue(forR2Result: await disassembler.runCommand(command))
+        }
+        let atClause = arguments.range(of: "@").map { String(arguments[$0.lowerBound...]) } ?? ""
+        let address = await disassembler.runCommand("?v $$ \(atClause)".trimmingCharacters(in: .whitespaces))
+        let base = decodeR2Address(address.output)
+        return .binary(data, meta: REPLCell.Result.BinaryMeta(typedArray: nil, baseAddress: base))
+    }
+
+    private func decodeR2ByteArray(_ output: String?) -> Data? {
+        guard let output, let data = output.data(using: .utf8),
+            let values = try? JSONSerialization.jsonObject(with: data) as? [Int]
+        else { return nil }
+        return Data(values.map { UInt8($0 & 0xff) })
+    }
+
+    private func decodeR2Address(_ output: String?) -> UInt64? {
+        guard let trimmed = output?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        if trimmed.hasPrefix("0x") { return UInt64(trimmed.dropFirst(2), radix: 16) }
+        return UInt64(trimmed)
     }
 
     private func captureREPLSeek(disassembler: Disassembler, sessionID: UUID) async {
@@ -5188,6 +5224,7 @@ public func deleteCustomInstrument(_ defID: UUID) async {
                 case .js(let v): resultValue = .js(v)
                 case .text(let t): resultValue = .text(t)
                 case .styled(let s): resultValue = .styled(s)
+                case .binary(let d, let m): resultValue = .binary(d, meta: m)
                 }
                 let cell = REPLCell(
                     id: result.id,

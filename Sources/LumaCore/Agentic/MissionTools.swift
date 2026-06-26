@@ -1379,6 +1379,10 @@ public enum MissionTools {
             payload["text"] = text
             let preview = text.count > 96 ? text.prefix(95) + "…" : Substring(text)
             summary = "REPL cell \(cellShort) → \(preview)"
+        case .binary(let data, _):
+            payload["kind"] = "binary"
+            payload["byte_count"] = data.count
+            summary = "REPL cell \(cellShort) → \(data.count) bytes"
         }
         return makeResult(jsonObject: payload, summary: summary)
     }

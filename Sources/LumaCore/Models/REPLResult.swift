@@ -11,6 +11,7 @@ public struct REPLResult: Sendable {
         case js(JSInspectValue)
         case text(String)
         case styled(StyledText)
+        case binary(Data, meta: REPLCell.Result.BinaryMeta?)
     }
 
     public init(id: UUID = UUID(), code: String, language: REPLLanguage = .javascript, value: Value, timestamp: Date = .now) {

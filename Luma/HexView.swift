@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HexView: View {
     let data: Data
+    var baseAddress: UInt64 = 0
 
     let bytesPerRow: Int = 16
 
@@ -29,7 +30,7 @@ struct HexView: View {
 
     private var bytes: [UInt8] { Array(data) }
 
-    private static let offsetFormat = "%08X"
+    private static let offsetFormat = "%08llX"
 
     private var rowFont: Font { .system(.caption, design: .monospaced) }
     private var hexFont: Font {
@@ -83,7 +84,7 @@ struct HexView: View {
     }
 
     private func offsetText(_ offset: Int) -> some View {
-        Text(String(format: HexView.offsetFormat, offset))
+        Text(String(format: HexView.offsetFormat, baseAddress &+ UInt64(offset)))
             .font(rowFont)
             .lineLimit(1)
             .foregroundStyle(Color.green.opacity(0.85))

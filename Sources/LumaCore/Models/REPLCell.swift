@@ -52,9 +52,11 @@ public struct REPLCell: Codable, Identifiable, Sendable, FetchableRecord, Persis
 
         public struct BinaryMeta: Codable, Equatable, Sendable {
             public let typedArray: String?
+            public let baseAddress: UInt64?
 
-            public init(typedArray: String?) {
+            public init(typedArray: String?, baseAddress: UInt64? = nil) {
                 self.typedArray = typedArray
+                self.baseAddress = baseAddress
             }
         }
     }

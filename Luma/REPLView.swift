@@ -520,8 +520,8 @@ private struct REPLCellView: View {
                                 selection: $selection
                             )
 
-                        case .binary(let data, _):
-                            HexView(data: data)
+                        case .binary(let data, let meta):
+                            HexView(data: data, baseAddress: meta?.baseAddress ?? 0)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
