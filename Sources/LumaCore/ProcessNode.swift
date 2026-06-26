@@ -874,16 +874,21 @@ public final class ProcessNode: Identifiable {
         }
     }
 
+    private func annotatedCompletion(_ name: String) -> REPLCompletion {
+        guard let detail = FridaTypeIndex.detail(for: name) else { return REPLCompletion(name) }
+        return REPLCompletion(insertText: name, displayText: name, detailText: detail)
+    }
+
     private func completeJavaScript(code: String, cursor: Int) async -> [REPLCompletion] {
         do {
             let anyResult = try await script.exports.complete(code, cursor)
 
             if let strings = anyResult as? [String] {
-                return strings.map(REPLCompletion.init)
+                return strings.map(annotatedCompletion)
             }
 
             if let anyArray = anyResult as? [Any] {
-                return anyArray.compactMap { $0 as? String }.map(REPLCompletion.init)
+                return anyArray.compactMap { $0 as? String }.map(annotatedCompletion)
             }
         } catch {
             yieldEngineEvent(subsystem: "repl", level: .warning, text: "Failed to fetch REPL completions: \(error)")
