@@ -65,6 +65,14 @@ extension Engine {
         mutateSessionUIState(sessionID: sessionID) { $0.lastSelectedThreadID = threadID }
     }
 
+    public func setREPLLanguage(sessionID: UUID, _ language: REPLLanguage) {
+        mutateSessionUIState(sessionID: sessionID) { $0.replLanguage = language }
+    }
+
+    public func setREPLDraft(sessionID: UUID, _ draft: String?) {
+        mutateSessionUIState(sessionID: sessionID) { $0.replDraft = draft }
+    }
+
     private func mutateSessionUIState(sessionID: UUID, _ mutate: (inout SessionUIState) -> Void) {
         var state = sessionUIStates[sessionID] ?? SessionUIState(sessionID: sessionID)
         mutate(&state)
@@ -95,5 +103,13 @@ extension Engine {
 
     public func lastSelectedThreadID(forSessionID sessionID: UUID) -> UInt? {
         sessionUIStates[sessionID]?.lastSelectedThreadID
+    }
+
+    public func replLanguage(forSessionID sessionID: UUID) -> REPLLanguage {
+        sessionUIStates[sessionID]?.replLanguage ?? .javascript
+    }
+
+    public func replDraft(forSessionID sessionID: UUID) -> String? {
+        sessionUIStates[sessionID]?.replDraft
     }
 }

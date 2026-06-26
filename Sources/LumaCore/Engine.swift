@@ -2491,7 +2491,7 @@ public final class Engine {
 
     private static let maxRadare2Completions = 64
 
-    private func radare2REPLCompletions(forCode code: String, cursor: Int, sessionID: UUID) async -> [String] {
+    private func radare2REPLCompletions(forCode code: String, cursor: Int, sessionID: UUID) async -> [REPLCompletion] {
         guard let disassembler = disassembler(forSessionID: sessionID) else { return [] }
 
         let head = String(code.prefix(cursor))
@@ -2502,13 +2502,49 @@ public final class Engine {
         if atCommandPosition {
             return await commandCompletions(prefix: token, disassembler: disassembler)
         }
-        return await flagCompletions(prefix: token, disassembler: disassembler)
+        return await argumentCompletions(command: leadingCommand(head), prefix: token, disassembler: disassembler)
     }
 
-    private func commandCompletions(prefix: String, disassembler: Disassembler) async -> [String] {
+    private func leadingCommand(_ head: String) -> String {
+        String(head.prefix(while: { !$0.isWhitespace }))
+    }
+
+    private func argumentCompletions(command: String, prefix: String, disassembler: Disassembler) async -> [REPLCompletion] {
+        switch command {
+        case "e":
+            return await evalCompletions(prefix: prefix, disassembler: disassembler)
+        case "fs":
+            return await flagspaceCompletions(prefix: prefix, disassembler: disassembler)
+        default:
+            return await flagCompletions(prefix: prefix, disassembler: disassembler)
+        }
+    }
+
+    private func evalCompletions(prefix: String, disassembler: Disassembler) async -> [REPLCompletion] {
+        let result = await disassembler.runCommand("e?j")
+        guard let data = result.output.data(using: .utf8),
+            let variables = try? JSONDecoder().decode([R2EvalVariable].self, from: data)
+        else { return [] }
+        return variables
+            .filter { $0.name.hasPrefix(prefix) }
+            .prefix(Self.maxRadare2Completions)
+            .map { REPLCompletion(insertText: $0.name, displayText: $0.name, detailText: $0.detail) }
+    }
+
+    private func flagspaceCompletions(prefix: String, disassembler: Disassembler) async -> [REPLCompletion] {
+        let result = await disassembler.runCommand("fsq")
+        return result.output
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix(prefix) }
+            .prefix(Self.maxRadare2Completions)
+            .map(REPLCompletion.init)
+    }
+
+    private func commandCompletions(prefix: String, disassembler: Disassembler) async -> [REPLCompletion] {
         let result = await disassembler.runCommand("\(prefix)?")
         var seen: Set<String> = []
-        var names: [String] = []
+        var entries: [(name: String, signature: String, description: String)] = []
         for rawLine in result.output.split(separator: "\n") {
             let line = StyledText.parseAnsi(String(rawLine)).plainText
             guard line.hasPrefix("|") else { continue }
@@ -2516,17 +2552,46 @@ public final class Engine {
             guard let first = entry.split(separator: " ").first else { continue }
             let name = String(first.prefix(while: isCompletionTokenCharacter))
             guard name.hasPrefix(prefix), seen.insert(name).inserted else { continue }
-            names.append(name)
+            let (signature, description) = splitHelp(entry)
+            entries.append((name, signature, description))
         }
-        return Array(names.prefix(Self.maxRadare2Completions))
+
+        return entries.prefix(Self.maxRadare2Completions).map { entry in
+            REPLCompletion(
+                insertText: entry.name,
+                displayText: entry.signature,
+                detailText: entry.description.isEmpty ? nil : entry.description
+            )
+        }
     }
 
-    private func flagCompletions(prefix: String, disassembler: Disassembler) async -> [String] {
+    private func splitHelp(_ entry: String) -> (signature: String, description: String) {
+        guard let separator = entry.range(of: "\\s{2,}", options: .regularExpression) else {
+            return (entry, "")
+        }
+        return (String(entry[..<separator.lowerBound]), String(entry[separator.upperBound...]))
+    }
+
+    private func flagCompletions(prefix: String, disassembler: Disassembler) async -> [REPLCompletion] {
         let result = await disassembler.runCommand("fq~\(prefix)")
         let names = result.output.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }
         let prefixMatches = names.filter { $0.hasPrefix(prefix) }
         let chosen = prefixMatches.isEmpty ? names : prefixMatches
-        return Array(chosen.prefix(Self.maxRadare2Completions))
+        return Array(chosen.prefix(Self.maxRadare2Completions)).map(REPLCompletion.init)
+    }
+
+    private struct R2EvalVariable: Decodable {
+        let name: String
+        let description: String?
+
+        var detail: String? {
+            description.flatMap { $0.isEmpty ? nil : $0 }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case description = "desc"
+        }
     }
 
     private func trailingToken(_ text: String) -> String {
@@ -2538,10 +2603,10 @@ public final class Engine {
     }
 
     private func replValue(forR2Result result: R2CommandResult) -> REPLResult.Value {
-        let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !result.hasErrors, let structured = JSInspectValue.fromJSONText(output) {
+        if !result.hasErrors, let structured = JSInspectValue.fromJSONText(result.output) {
             return .js(structured)
         }
+        let output = String(result.output.reversed().drop(while: \.isNewline).reversed())
         return .styled(StyledText.parseAnsi(combine(output, errors: result.errors)))
     }
 

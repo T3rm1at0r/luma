@@ -863,9 +863,9 @@ public final class ProcessNode: Identifiable {
         #endif
     }
 
-    public var completeRadare2: ((String, Int) async -> [String])!
+    public var completeRadare2: ((String, Int) async -> [REPLCompletion])!
 
-    public func completeInREPL(code: String, cursor: Int, language: REPLLanguage = .javascript) async -> [String] {
+    public func completeInREPL(code: String, cursor: Int, language: REPLLanguage = .javascript) async -> [REPLCompletion] {
         switch language {
         case .javascript:
             return await completeJavaScript(code: code, cursor: cursor)
@@ -874,16 +874,16 @@ public final class ProcessNode: Identifiable {
         }
     }
 
-    private func completeJavaScript(code: String, cursor: Int) async -> [String] {
+    private func completeJavaScript(code: String, cursor: Int) async -> [REPLCompletion] {
         do {
             let anyResult = try await script.exports.complete(code, cursor)
 
             if let strings = anyResult as? [String] {
-                return strings
+                return strings.map(REPLCompletion.init)
             }
 
             if let anyArray = anyResult as? [Any] {
-                return anyArray.compactMap { $0 as? String }
+                return anyArray.compactMap { $0 as? String }.map(REPLCompletion.init)
             }
         } catch {
             yieldEngineEvent(subsystem: "repl", level: .warning, text: "Failed to fetch REPL completions: \(error)")

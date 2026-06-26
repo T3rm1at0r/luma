@@ -26,6 +26,8 @@ struct REPLView: View {
     @State private var inputCode: String = ""
     @State private var isInputFocused: Bool = false
     @State private var mode: LumaCore.REPLLanguage = .javascript
+    @State private var didRestoreInputState = false
+    @State private var draftSaveTask: Task<Void, Never>?
 
     @State private var historyCursor: Int = 0
     @State private var historyCursorInitialized = false
@@ -190,7 +192,7 @@ struct REPLView: View {
                             historyNext()
                         },
                         requestCompletions: { code, cursor in
-                            guard let node = engine.node(forSessionID: sessionID) else { return [] as [String] }
+                            guard let node = engine.node(forSessionID: sessionID) else { return [] as [LumaCore.REPLCompletion] }
                             return await node.completeInREPL(code: code, cursor: cursor, language: mode)
                         },
                         language: mode
@@ -206,7 +208,7 @@ struct REPLView: View {
                             onCommit: { _ in },
                             onHistoryUp: {},
                             onHistoryDown: {},
-                            requestCompletions: { _, _ in [] as [String] },
+                            requestCompletions: { _, _ in [] as [LumaCore.REPLCompletion] },
                             language: .javascript
                         )
                         .disabled(true)
@@ -244,6 +246,12 @@ struct REPLView: View {
                 }
             }
 
+            if !didRestoreInputState {
+                didRestoreInputState = true
+                inputCode = engine.replDraft(forSessionID: sessionID) ?? ""
+                mode = engine.replLanguage(forSessionID: sessionID)
+            }
+
             DispatchQueue.main.async {
                 isInputFocused = node != nil
 
@@ -252,6 +260,12 @@ struct REPLView: View {
                     historyCursorInitialized = true
                 }
             }
+        }
+        .onChange(of: inputCode) {
+            scheduleDraftSave()
+        }
+        .onChange(of: mode) { _, newValue in
+            engine.setREPLLanguage(sessionID: sessionID, newValue)
         }
         .contextMenu {
             Button {
@@ -347,7 +361,7 @@ struct REPLView: View {
             historyCursor -= 1
         }
 
-        inputCode = history[historyCursor].code
+        recall(history[historyCursor])
     }
 
     private func historyNext() {
@@ -358,10 +372,25 @@ struct REPLView: View {
 
         if historyCursor < history.count - 1 {
             historyCursor += 1
-            inputCode = history[historyCursor].code
+            recall(history[historyCursor])
         } else {
             historyCursor = history.count
             inputCode = ""
+        }
+    }
+
+    private func recall(_ cell: LumaCore.REPLCell) {
+        inputCode = cell.code
+        mode = cell.language
+    }
+
+    private func scheduleDraftSave() {
+        draftSaveTask?.cancel()
+        let draft = inputCode
+        draftSaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            engine.setREPLDraft(sessionID: sessionID, draft.isEmpty ? nil : draft)
         }
     }
 }
@@ -553,7 +582,7 @@ private struct REPLInputField: View {
     let onCommit: (String) -> Void
     let onHistoryUp: () -> Void
     let onHistoryDown: () -> Void
-    let requestCompletions: (String, Int) async -> [String]
+    let requestCompletions: (String, Int) async -> [LumaCore.REPLCompletion]
     let language: LumaCore.REPLLanguage
 
     var body: some View {
@@ -593,7 +622,7 @@ private struct REPLInputField: View {
         let onHistoryUp: () -> Void
         let onHistoryDown: () -> Void
 
-        let requestCompletions: (String, Int) async -> [String]
+        let requestCompletions: (String, Int) async -> [LumaCore.REPLCompletion]
         let language: LumaCore.REPLLanguage
 
         func makeCoordinator() -> Coordinator {
@@ -638,8 +667,11 @@ private struct REPLInputField: View {
                 let window = nsView.window,
                 window.firstResponder != nsView.currentEditor()
             {
-                nsView.becomeFirstResponder()
-                moveInsertionToEnd(of: nsView)
+                DispatchQueue.main.async { [weak nsView] in
+                    guard let nsView else { return }
+                    nsView.becomeFirstResponder()
+                    moveInsertionToEnd(of: nsView)
+                }
             }
         }
 
@@ -757,7 +789,9 @@ private struct REPLInputField: View {
                     }
 
                     let items: [Item] = suggestions.map { suggestion in
-                        NSSuggestionItem(representedValue: suggestion, title: suggestion)
+                        var item = NSSuggestionItem(representedValue: suggestion.insertText, title: suggestion.displayText)
+                        item.secondaryTitle = suggestion.detailText
+                        return item
                     }
 
                     let section = NSSuggestionItemSection(items: items)

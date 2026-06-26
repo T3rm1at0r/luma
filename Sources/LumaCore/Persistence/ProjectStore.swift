@@ -1472,6 +1472,8 @@ public final class ProjectStore: Sendable {
             t.column("last_selected_module_id", .text)
             t.column("last_selected_thread_id", .integer)
             t.column("ambient_mission_id", .text)
+            t.column("repl_language", .text).notNull().defaults(to: REPLLanguage.javascript.rawValue)
+            t.column("repl_draft", .text)
         }
 
         try db.create(table: "address_insight", ifNotExists: true) { t in
