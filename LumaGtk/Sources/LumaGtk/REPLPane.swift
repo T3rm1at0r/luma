@@ -20,6 +20,8 @@ final class REPLPane {
 
     private var cells: [LumaCore.REPLCell] = []
     private var rowKeepers: [Any] = []
+    private var mode: LumaCore.REPLLanguage = .javascript
+    private var draftSaveTask: Task<Void, Never>?
 
     init(engine: Engine, sessionID: UUID, owner: MainWindow? = nil) {
         self.engine = engine
@@ -47,17 +49,73 @@ final class REPLPane {
         timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "HH:mm:ss"
 
+        mode = engine.replLanguage(forSessionID: sessionID)
+
         console.onSubmit = { [weak self] code in self?.submit(code: code) }
         console.onComplete = { [weak self] code, cursor in
-            guard let node = self?.engine?.node(forSessionID: self?.sessionID ?? UUID()) else { return [] }
-            return await node.completeInREPL(code: code, cursor: cursor)
+            guard let self, let node = self.engine?.node(forSessionID: self.sessionID) else { return [] }
+            return await node.completeInREPL(code: code, cursor: cursor, language: self.mode)
+        }
+        console.onPromptClicked = { [weak self] in self?.toggleMode() }
+        console.commandInterceptor = { [weak self] code in self?.handleModeCommand(code) ?? false }
+        console.onInputChanged = { [weak self] text in self?.scheduleDraftSave(text) }
+        console.onHistoryRecalled = { [weak self] code in
+            guard let self,
+                let cell = self.cells.last(where: { !$0.isSessionBoundary && $0.code == code })
+            else { return }
+            self.setMode(cell.language)
         }
         console.onBackgroundContextMenu = { [weak self] anchor, x, y in
             self?.presentScrollAreaContextMenu(at: anchor, x: x, y: y)
         }
 
+        applyMode()
+        console.setInputText(engine.replDraft(forSessionID: sessionID) ?? "")
+
         loadCells()
         applySessionState()
+    }
+
+    private func applyMode() {
+        console.setPromptMarkup(Self.promptMarkup(for: mode))
+        console.completionReplacesWholeToken = mode == .r2
+    }
+
+    private func toggleMode() {
+        setMode(mode == .javascript ? .r2 : .javascript)
+        console.focusInput()
+    }
+
+    private func handleModeCommand(_ code: String) -> Bool {
+        switch code {
+        case ":": setMode(mode == .javascript ? .r2 : .javascript)
+        case ":js", ":javascript": setMode(.javascript)
+        case ":r2": setMode(.r2)
+        default: return false
+        }
+        return true
+    }
+
+    private func setMode(_ newMode: LumaCore.REPLLanguage) {
+        guard newMode != mode else { return }
+        mode = newMode
+        applyMode()
+        engine?.setREPLLanguage(sessionID: sessionID, newMode)
+    }
+
+    private func scheduleDraftSave(_ text: String) {
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.engine?.setREPLDraft(sessionID: self.sessionID, text.isEmpty ? nil : text)
+        }
+    }
+
+    private static func promptMarkup(for language: LumaCore.REPLLanguage) -> String {
+        let color = language == .r2 ? "#3584e4" : "#e5a50a"
+        let label = language == .r2 ? "r2" : "js"
+        return "<span foreground=\"\(color)\">\(label) \u{203A}</span>"
     }
 
     func applySessionState() {
@@ -189,6 +247,7 @@ final class REPLPane {
                 id: cellID,
                 sessionID: sessionID,
                 code: code,
+                language: mode,
                 result: .text("Running\u{2026}"),
                 timestamp: Date()
             )
@@ -196,11 +255,12 @@ final class REPLPane {
             engine.collaboration.sendReplEvalRequest(
                 sessionID: sessionID,
                 code: code,
+                language: mode,
                 cellID: cellID
             )
         } else if let node = engine.node(forSessionID: sessionID) {
             Task { @MainActor in
-                await node.evalInREPL(code)
+                await node.evalInREPL(code, language: mode)
             }
         }
     }
@@ -231,9 +291,10 @@ final class REPLPane {
         column.hexpand = true
 
         let codeRow = Box(orientation: .horizontal, spacing: 8)
-        let prompt = Label(str: "\u{203A}")
+        let prompt = Label(str: "")
         prompt.add(cssClass: "monospace")
-        prompt.add(cssClass: "dim-label")
+        prompt.useMarkup = true
+        prompt.setMarkup(str: Self.promptMarkup(for: cell.language))
         codeRow.append(child: prompt)
         let codeLabel = Label(str: DisplayTruncation.truncated(cell.code))
         codeLabel.add(cssClass: "monospace")
@@ -245,51 +306,72 @@ final class REPLPane {
         codeRow.append(child: codeLabel)
         column.append(child: codeRow)
 
-        let resultRow = Box(orientation: .horizontal, spacing: 6)
-        resultRow.hexpand = true
-        let resultArrow = Label(str: "\u{2190}")
-        resultArrow.add(cssClass: "monospace")
-        resultArrow.add(cssClass: "dim-label")
-        resultArrow.valign = .start
-        resultRow.append(child: resultArrow)
+        if !Self.isResultEmpty(cell.result) {
+            let resultRow = Box(orientation: .horizontal, spacing: 6)
+            resultRow.hexpand = true
+            let resultArrow = Label(str: "\u{2190}")
+            resultArrow.add(cssClass: "monospace")
+            resultArrow.add(cssClass: "dim-label")
+            resultArrow.valign = .start
+            resultRow.append(child: resultArrow)
 
-        let resultWidget: Widget
-        switch cell.result {
-        case .js(let value):
-            if let engine {
-                let wrapper = JSInspectValueWidget.make(value: value, engine: engine, sessionID: sessionID)
-                rowKeepers.append(wrapper)
-                resultWidget = wrapper.widget
-            } else {
+            let resultWidget: Widget
+            switch cell.result {
+            case .js(let value):
+                if let engine {
+                    let wrapper = JSInspectValueWidget.make(value: value, engine: engine, sessionID: sessionID)
+                    rowKeepers.append(wrapper)
+                    resultWidget = wrapper.widget
+                } else {
+                    resultWidget = makePlainResultLabel(text: format(result: cell.result))
+                }
+            case .styled(let styled):
+                let label = Label(str: "")
+                label.add(cssClass: "monospace")
+                label.useMarkup = true
+                label.setMarkup(str: StyledTextPango.markup(for: DisplayTruncation.truncated(styled)))
+                label.halign = .start
+                label.hexpand = true
+                label.wrap = true
+                label.selectable = true
+                resultWidget = label
+            case .binary(let data, let meta):
+                let column2 = Box(orientation: .vertical, spacing: 4)
+                column2.hexpand = true
+                column2.halign = .start
+                let kind = meta?.typedArray ?? "binary"
+                let header = Label(str: "<\(kind) \(data.count) bytes>")
+                header.add(cssClass: "monospace")
+                header.halign = .start
+                column2.append(child: header)
+                let hex = HexView(bytes: data)
+                rowKeepers.append(hex)
+                hex.widget.hexpand = true
+                hex.widget.vexpand = false
+                hex.widget.halign = .start
+                column2.append(child: hex.widget)
+                resultWidget = column2
+            case .text:
                 resultWidget = makePlainResultLabel(text: format(result: cell.result))
             }
-        case .binary(let data, let meta):
-            let column2 = Box(orientation: .vertical, spacing: 4)
-            column2.hexpand = true
-            column2.halign = .start
-            let kind = meta?.typedArray ?? "binary"
-            let header = Label(str: "<\(kind) \(data.count) bytes>")
-            header.add(cssClass: "monospace")
-            header.halign = .start
-            column2.append(child: header)
-            let hex = HexView(bytes: data)
-            rowKeepers.append(hex)
-            hex.widget.hexpand = true
-            hex.widget.vexpand = false
-            hex.widget.halign = .start
-            column2.append(child: hex.widget)
-            resultWidget = column2
-        case .text:
-            resultWidget = makePlainResultLabel(text: format(result: cell.result))
+            resultWidget.hexpand = true
+            resultWidget.halign = .start
+            resultRow.append(child: resultWidget)
+            column.append(child: resultRow)
         }
-        resultWidget.hexpand = true
-        resultWidget.halign = .start
-        resultRow.append(child: resultWidget)
-        column.append(child: resultRow)
 
         attachContextMenu(to: column, cell: cell)
 
         return column
+    }
+
+    private static func isResultEmpty(_ result: LumaCore.REPLCell.Result) -> Bool {
+        switch result {
+        case .text(let s): return s.isEmpty
+        case .styled(let s): return s.isEmpty
+        case .js(let v): return v == .undefined
+        case .binary(let data, _): return data.isEmpty
+        }
     }
 
     private func makePlainResultLabel(text: String) -> Widget {
@@ -355,6 +437,8 @@ final class REPLPane {
         switch cell.result {
         case .text(let s):
             details = s
+        case .styled(let s):
+            details = s.plainText
         case .js(let v):
             details = ""
             jsValue = v
@@ -380,6 +464,8 @@ final class REPLPane {
         switch result {
         case .text(let s):
             return s
+        case .styled(let s):
+            return s.plainText
         case .js(let value):
             return value.prettyDescription()
         case .binary(let data, let meta):

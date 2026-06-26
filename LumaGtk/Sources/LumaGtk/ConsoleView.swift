@@ -4,6 +4,7 @@ import Foundation
 import Gdk
 import struct Graphene.PointRef
 import Gtk
+import LumaCore
 
 @MainActor
 final class ConsoleView {
@@ -16,14 +17,20 @@ final class ConsoleView {
     }
 
     var onSubmit: ((String) -> Void)?
-    var onComplete: (@MainActor (_ code: String, _ cursor: Int) async -> [String])?
+    var onComplete: (@MainActor (_ code: String, _ cursor: Int) async -> [REPLCompletion])?
     var onBackgroundContextMenu: ((_ anchor: Widget, _ x: Double, _ y: Double) -> Void)?
+    var onInputChanged: ((String) -> Void)?
+    var onPromptClicked: (() -> Void)?
+    var onHistoryRecalled: ((String) -> Void)?
+    var commandInterceptor: ((String) -> Bool)?
+    var completionReplacesWholeToken = false
 
     private let style: Style
     private let emptyState: Widget
     private let cellsBox: Box
     private let cellsScroll: ScrolledWindow
     private let contentSlot: Box
+    private let prompt: Label
     private let inputEntry: Entry
     private let runButton: Button
     private var hasEntries = false
@@ -39,7 +46,7 @@ final class ConsoleView {
     private var completionPopover: Popover?
     private var completionList: ListBox?
     private var completionScroll: ScrolledWindow?
-    private var completionItems: [String] = []
+    private var completionItems: [REPLCompletion] = []
     private var completionBaseCode: String = ""
 
     init(style: Style, emptyState: Widget) {
@@ -79,7 +86,7 @@ final class ConsoleView {
         inputRow.marginTop = 6
         inputRow.marginBottom = 6
 
-        let prompt = Label(str: style.promptGlyph)
+        prompt = Label(str: style.promptGlyph)
         prompt.add(cssClass: "monospace")
         prompt.add(cssClass: "dim-label")
         inputRow.append(child: prompt)
@@ -125,6 +132,16 @@ final class ConsoleView {
         _ = inputEntry.grabFocus()
     }
 
+    func setPromptMarkup(_ markup: String) {
+        prompt.remove(cssClass: "dim-label")
+        prompt.useMarkup = true
+        prompt.setMarkup(str: markup)
+    }
+
+    func setInputText(_ text: String) {
+        replaceInput(with: text)
+    }
+
     func setHistory(_ items: [String]) {
         history = items
         historyCursor = history.count
@@ -144,12 +161,20 @@ final class ConsoleView {
         inputEntry.onChanged { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.suppressingChanged else { return }
+                self.onInputChanged?(self.inputEntry.text ?? "")
                 self.scheduleCompletionRequest()
             }
         }
         runButton.onClicked { [weak self] _ in
             MainActor.assumeIsolated { self?.submit() }
         }
+
+        let promptClick = GestureClick()
+        promptClick.set(button: 1)
+        promptClick.onPressed { [weak self] _, _, _, _ in
+            MainActor.assumeIsolated { self?.onPromptClicked?() }
+        }
+        prompt.install(controller: promptClick)
 
         let keyController = EventControllerKey()
         keyController.propagationPhase = GTK_PHASE_CAPTURE
@@ -178,6 +203,10 @@ final class ConsoleView {
         let raw = inputEntry.text ?? ""
         let code = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !code.isEmpty else { return }
+        if commandInterceptor?(code) == true {
+            inputEntry.text = ""
+            return
+        }
         inputEntry.text = ""
         appendHistory(code)
         onSubmit?(code)
@@ -233,6 +262,7 @@ final class ConsoleView {
             historyCursor -= 1
         }
         replaceInput(with: history[historyCursor])
+        onHistoryRecalled?(history[historyCursor])
     }
 
     private func historyNext() {
@@ -240,6 +270,7 @@ final class ConsoleView {
         if historyCursor < history.count - 1 {
             historyCursor += 1
             replaceInput(with: history[historyCursor])
+            onHistoryRecalled?(history[historyCursor])
         } else {
             historyCursor = history.count
             replaceInput(with: draftBeforeHistory)
@@ -288,7 +319,7 @@ final class ConsoleView {
         }
     }
 
-    private func applyCompletion(to code: String, suggestion: String) {
+    private func applyCompletion(to code: String, suggestion: REPLCompletion) {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._$"))
         let scalars = Array(code.unicodeScalars)
         var start = scalars.count
@@ -297,25 +328,23 @@ final class ConsoleView {
         }
         let token = String(String.UnicodeScalarView(scalars[start..<scalars.count]))
         let before = String(String.UnicodeScalarView(scalars[0..<start]))
+        let insert = suggestion.insertText
 
         let newToken: String
-        if let dotIdx = token.lastIndex(of: ".") {
+        if completionReplacesWholeToken {
+            newToken = insert
+        } else if let dotIdx = token.lastIndex(of: ".") {
             let baseExpr = String(token[..<dotIdx])
-            let lastSegment: String
-            if let sugDot = suggestion.lastIndex(of: ".") {
-                lastSegment = String(suggestion[suggestion.index(after: sugDot)...])
-            } else {
-                lastSegment = suggestion
-            }
+            let lastSegment = insert.lastIndex(of: ".").map { String(insert[insert.index(after: $0)...]) } ?? insert
             newToken = baseExpr + "." + lastSegment
         } else {
-            newToken = suggestion
+            newToken = insert
         }
 
         replaceInput(with: before + newToken)
     }
 
-    private func showCompletionPopover(suggestions: [String]) {
+    private func showCompletionPopover(suggestions: [REPLCompletion]) {
         dismissCompletionPopover()
 
         let popover = Popover()
@@ -327,17 +356,28 @@ final class ConsoleView {
         listBox.canFocus = false
         listBox.add(cssClass: "boxed-list")
         listBox.setSizeRequest(width: 280, height: -1)
+        let titleGroup = SizeGroup(mode: .horizontal)
         for suggestion in suggestions {
             let row = ListBoxRow()
             row.canFocus = false
-            let label = Label(str: suggestion)
-            label.add(cssClass: "monospace")
-            label.halign = .start
-            label.marginStart = 8
-            label.marginEnd = 8
-            label.marginTop = 4
-            label.marginBottom = 4
-            row.set(child: label)
+            let line = Box(orientation: .horizontal, spacing: 12)
+            line.marginStart = 8
+            line.marginEnd = 8
+            line.marginTop = 4
+            line.marginBottom = 4
+            let title = Label(str: suggestion.displayText)
+            title.add(cssClass: "monospace")
+            title.halign = .start
+            titleGroup.add(widget: title)
+            line.append(child: title)
+            if let detail = suggestion.detailText {
+                let detailLabel = Label(str: detail)
+                detailLabel.add(cssClass: "dim-label")
+                detailLabel.add(cssClass: "caption")
+                detailLabel.halign = .start
+                line.append(child: detailLabel)
+            }
+            row.set(child: line)
             listBox.append(child: row)
         }
         listBox.onRowActivated { [weak self] _, _ in
