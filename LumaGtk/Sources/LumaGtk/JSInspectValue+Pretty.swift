@@ -15,7 +15,9 @@ extension JSInspectValue {
     var inlineDescription: String {
         switch self {
         case .number(let n):
-            if n.rounded(.towardZero) == n { return String(Int(n)) }
+            if n.rounded(.towardZero) == n {
+                return Int(exactly: n).map(String.init) ?? String(format: "%.0f", n)
+            }
             return String(n)
         case .string(let s):
             return "\"\(escapeForInline(s))\""
