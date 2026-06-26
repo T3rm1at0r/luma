@@ -269,6 +269,7 @@ final class InsightDetailView {
             let banner = SessionDetachedBanner.make(
                 for: current,
                 gatingActive: gatingActive,
+                canReattach: engine.canTakeHosting(current),
                 onReattach: { [weak self] in self?.owner?.reestablishSession(id: current.id) },
                 onDisarm: { [weak engine] in
                     Task { @MainActor in await engine?.disarmSession(id: current.id) }

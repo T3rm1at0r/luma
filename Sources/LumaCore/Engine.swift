@@ -1264,6 +1264,22 @@ public final class Engine {
         !collaboration.isCollaborative || collaboration.isOwner
     }
 
+    public func canTakeHosting(_ session: ProcessSession) -> Bool {
+        guard collaboration.isCollaborative else { return true }
+        guard case .joined = collaboration.status, collaboration.isOwner else { return false }
+        if localUserHosts(session) { return true }
+        return !isHostedRemotelyLive(session.id)
+    }
+
+    private func becomeDriver(sessionID: UUID) {
+        guard collaboration.isCollaborative, let localUser = collaboration.localUser else { return }
+        driverBySession[sessionID] = localUser
+        collaboration.enqueueClaimDriver(sessionID: sessionID)
+        if let session = sessions.first(where: { $0.id == sessionID }) {
+            onSessionListChanged?(.sessionUpdated(session))
+        }
+    }
+
     private func emitEngineError(subsystem: String, text: String) {
         emitEngineEvent(subsystem: subsystem, level: .error, text: text)
     }
@@ -2201,6 +2217,7 @@ public final class Engine {
             pid: node.pid,
             processName: node.processName
         )
+        becomeDriver(sessionID: sessionID)
     }
 
     public func resumeSpawnedProcess(node: ProcessNode) async {
@@ -3082,6 +3099,7 @@ public final class Engine {
             pid: process.pid,
             processName: process.name
         )
+        becomeDriver(sessionID: session.id)
 
         _ = try? await attach(device: device, process: process, session: session)
     }

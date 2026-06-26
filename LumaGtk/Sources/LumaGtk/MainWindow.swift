@@ -2881,7 +2881,7 @@ final class MainWindow: InstrumentUIHost {
     private func presentSessionContextMenu(anchor: Widget, x: Double, y: Double, session: LumaCore.ProcessSession) {
         let node = engine?.node(forSessionID: session.id)
         if engine?.localUserHosts(session.id) == false {
-            if engine?.collaboration.isOwner == true {
+            if engine?.canTakeHosting(session) == true {
                 ContextMenu.present([
                     [.init("Run on My Device…") { [weak self] in
                         self?.rehost(sessionID: session.id)
@@ -2902,7 +2902,7 @@ final class MainWindow: InstrumentUIHost {
                     self?.showToast("Detached \(session.processName)")
                 }
             })
-        } else if session.lastAttachedAt != nil {
+        } else if session.lastAttachedAt != nil, engine?.canTakeHosting(session) == true {
             topSection.append(.init("Reestablish…") { [weak self] in
                 self?.reestablishSession(id: session.id)
             })

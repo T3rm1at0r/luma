@@ -273,8 +273,7 @@ struct SessionDetachedBanner: View {
     }
 
     private var canAct: Bool {
-        if localUserOwnsHost { return true }
-        return engine.collaboration.isOwner
+        engine.canTakeHosting(session)
     }
 
     private var actionLabel: String {

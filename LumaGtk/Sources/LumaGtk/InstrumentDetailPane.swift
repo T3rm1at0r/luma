@@ -80,6 +80,7 @@ final class InstrumentDetailPane {
         let banner = SessionDetachedBanner.make(
             for: session,
             gatingActive: engine.isGatingActive(forDeviceID: session.deviceID),
+            canReattach: engine.canTakeHosting(session),
             onReattach: { [weak self] in self?.owner?.reestablishSession(id: session.id) },
             onDisarm: { [weak engine] in
                 Task { @MainActor in await engine?.disarmSession(id: session.id) }

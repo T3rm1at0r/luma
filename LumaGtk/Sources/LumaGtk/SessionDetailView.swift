@@ -245,6 +245,7 @@ final class SessionDetailView {
         let banner = SessionDetachedBanner.make(
             for: session,
             gatingActive: gatingActive,
+            canReattach: engine?.canTakeHosting(session) ?? true,
             onReattach: { [weak self] in self?.onReestablish?() },
             onDisarm: { [weak self] in self?.disarmSession(session.id) },
             onArm: { [weak self] in self?.onArmRequested?() },

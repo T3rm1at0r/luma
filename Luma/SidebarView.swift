@@ -321,7 +321,7 @@ private struct SidebarSessionHeaderRow: View {
         .padding(.vertical, 4)
         .contextMenu {
             if !engine.localUserHosts(session.id) {
-                if engine.collaboration.isOwner {
+                if engine.canTakeHosting(session) {
                     Button {
                         rehost()
                     } label: {
@@ -361,7 +361,7 @@ private struct SidebarSessionHeaderRow: View {
                     Label("Delete Session", systemImage: "trash")
                 }
             } else {
-                if session.lastAttachedAt != nil {
+                if session.lastAttachedAt != nil, engine.canTakeHosting(session) {
                     Button {
                         reestablish()
                     } label: {

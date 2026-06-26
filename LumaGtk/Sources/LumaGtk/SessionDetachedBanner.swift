@@ -8,6 +8,7 @@ enum SessionDetachedBanner {
     static func make(
         for session: LumaCore.ProcessSession,
         gatingActive: Bool,
+        canReattach: Bool = true,
         onReattach: @escaping () -> Void,
         onDisarm: @escaping () -> Void,
         onArm: @escaping () -> Void,
@@ -23,7 +24,7 @@ enum SessionDetachedBanner {
         }
         let hasError = session.lastError?.isEmpty == false
         if session.lastAttachedAt == nil, !hasError, case .spawn = session.kind {
-            return makeIdle(for: session, onReattach: onReattach, onArm: onArm)
+            return makeIdle(for: session, canReattach: canReattach, onReattach: onReattach, onArm: onArm)
         }
         let style: LumaBannerStyle = hasError || session.detachReason != .applicationRequested ? .error : .warning
         let actionLabel = "\(session.kind.reestablishLabel)\u{2026}"
@@ -34,7 +35,7 @@ enum SessionDetachedBanner {
             message: statusText(for: session),
             actionLabel: actionLabel,
             actionStyle: .suggested,
-            actionEnabled: session.phase != .attaching,
+            actionEnabled: canReattach && session.phase != .attaching,
             onAction: onReattach
         )
     }
@@ -73,6 +74,7 @@ enum SessionDetachedBanner {
 
     private static func makeIdle(
         for session: LumaCore.ProcessSession,
+        canReattach: Bool,
         onReattach: @escaping () -> Void,
         onArm: @escaping () -> Void
     ) -> Widget {
@@ -83,7 +85,7 @@ enum SessionDetachedBanner {
             message: "Idle — not waiting for a launch.",
             actionLabel: "\(session.kind.reestablishLabel)\u{2026}",
             actionStyle: .suggested,
-            actionEnabled: true,
+            actionEnabled: canReattach,
             onAction: onReattach,
             secondaryActionLabel: "Arm\u{2026}",
             onSecondaryAction: onArm
