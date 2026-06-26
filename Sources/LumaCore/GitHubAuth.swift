@@ -186,8 +186,13 @@ public final class GitHubAuth {
                 .data(using: .utf8)
             req.setValue("application/json", forHTTPHeaderField: "Accept")
 
-            let (data, _) = try await URLSession.shared.data(for: req)
-            let resp = try JSONDecoder().decode(AccessTokenResponse.self, from: data)
+            let resp: AccessTokenResponse
+            do {
+                let (data, _) = try await URLSession.shared.data(for: req)
+                resp = try JSONDecoder().decode(AccessTokenResponse.self, from: data)
+            } catch is URLError {
+                continue
+            }
 
             if let error = resp.error {
                 if error == "authorization_pending" { continue }
