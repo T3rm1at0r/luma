@@ -435,6 +435,7 @@ private struct REPLEmptyState: View {
         VStack(alignment: .leading, spacing: 8) {
             tip("Type an expression and press Return to evaluate it.")
             tip("Click the prompt — or type :js / :r2 — to switch between JavaScript and radare2.")
+            tip("In JavaScript, try Process.mainModule or Process.enumerateModules().")
             tip("In r2 mode, run commands like pdf, afl, or px 64.")
             tip("Step through previous expressions with ↑ and ↓.")
         }

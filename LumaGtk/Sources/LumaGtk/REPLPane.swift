@@ -586,6 +586,7 @@ final class REPLPane {
         for text in [
             "Type an expression and press Return to evaluate it.",
             "Click the prompt \u{2014} or type :js / :r2 \u{2014} to switch between JavaScript and radare2.",
+            "In JavaScript, try Process.mainModule or Process.enumerateModules().",
             "In r2 mode, run commands like pdf, afl, or px 64.",
             "Step through previous expressions with \u{2191} and \u{2193}.",
         ] {
