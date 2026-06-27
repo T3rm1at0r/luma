@@ -616,7 +616,7 @@ private struct REPLResultText: View {
                     Button("Show all") { revealed = total }
                 }
                 .font(.caption2)
-                .buttonStyle(.link)
+                .platformLinkButtonStyle()
             }
         }
     }
