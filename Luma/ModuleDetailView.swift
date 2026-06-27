@@ -130,6 +130,7 @@ struct ModuleDetailView: View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .onTapGesture(count: 2) { openInsight(address: address, context: context) }
             .pointerActions(
                 engine: engine,
                 sessionID: sessionID,
@@ -139,6 +140,19 @@ struct ModuleDetailView: View {
                 copyTitle: "Copy Address",
                 selection: $selection
             )
+    }
+
+    private func openInsight(address: UInt64, context: AddressContext) {
+        let kind: LumaCore.AddressInsight.Kind = context.kind == .data ? .memory : .disassembly
+        Task { @MainActor in
+            guard let insight = try? engine.getOrCreateInsight(
+                sessionID: sessionID,
+                pointer: address,
+                kind: kind,
+                preferredAnchor: context.anchorHint
+            ) else { return }
+            selection = .insight(sessionID, insight.id)
+        }
     }
 
     private func load(_ module: LumaCore.ProcessModule) async {
