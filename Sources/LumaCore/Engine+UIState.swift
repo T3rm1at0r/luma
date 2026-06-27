@@ -114,7 +114,7 @@ extension Engine {
     public func sidebarExpansion(forSessionID sessionID: UUID, group: SessionSidebarGroup) -> SidebarExpansion {
         let state = sessionUIStates[sessionID]
         switch group {
-        case .modules: return state?.modulesExpansion ?? .expanded
+        case .modules: return state?.modulesExpansion ?? .collapsed
         case .threads: return state?.threadsExpansion ?? .collapsed
         }
     }

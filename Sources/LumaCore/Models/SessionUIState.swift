@@ -47,7 +47,7 @@ public struct SessionUIState: Codable, Equatable, Identifiable, Sendable, Fetcha
     public init(
         sessionID: UUID,
         sidebarExpansion: SidebarExpansion = .expanded,
-        modulesExpansion: SidebarExpansion = .expanded,
+        modulesExpansion: SidebarExpansion = .collapsed,
         threadsExpansion: SidebarExpansion = .collapsed,
         collapsedHookInstruments: Set<UUID> = [],
         detailSection: String? = nil,

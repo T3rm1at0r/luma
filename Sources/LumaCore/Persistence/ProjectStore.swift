@@ -1477,7 +1477,7 @@ public final class ProjectStore: Sendable {
             t.primaryKey("session_id", .text).notNull()
                 .references("process_session", onDelete: .cascade)
             t.column("sidebar_expansion", .text).notNull().defaults(to: SidebarExpansion.expanded.rawValue)
-            t.column("modules_expansion", .text).notNull().defaults(to: SidebarExpansion.expanded.rawValue)
+            t.column("modules_expansion", .text).notNull().defaults(to: SidebarExpansion.collapsed.rawValue)
             t.column("threads_expansion", .text).notNull().defaults(to: SidebarExpansion.collapsed.rawValue)
             t.column("collapsed_hook_instruments", .text).notNull().defaults(to: "[]")
             t.column("detail_section", .text)
@@ -1803,9 +1803,8 @@ public final class ProjectStore: Sendable {
         let javascript = REPLLanguage.javascript.rawValue
         try addColumnIfMissing(db, table: "repl_cell", column: "language", definition: "TEXT NOT NULL DEFAULT '\(javascript)'")
         try addColumnIfMissing(db, table: "notebook_entry", column: "styled_details", definition: "BLOB")
-        let expanded = SidebarExpansion.expanded.rawValue
         let collapsed = SidebarExpansion.collapsed.rawValue
-        try addColumnIfMissing(db, table: "session_ui_state", column: "modules_expansion", definition: "TEXT NOT NULL DEFAULT '\(expanded)'")
+        try addColumnIfMissing(db, table: "session_ui_state", column: "modules_expansion", definition: "TEXT NOT NULL DEFAULT '\(collapsed)'")
         try addColumnIfMissing(db, table: "session_ui_state", column: "threads_expansion", definition: "TEXT NOT NULL DEFAULT '\(collapsed)'")
         try addColumnIfMissing(db, table: "session_ui_state", column: "collapsed_hook_instruments", definition: "TEXT NOT NULL DEFAULT '[]'")
         try addColumnIfMissing(db, table: "session_ui_state", column: "repl_language", definition: "TEXT NOT NULL DEFAULT '\(javascript)'")
