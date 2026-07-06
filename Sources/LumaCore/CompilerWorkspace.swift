@@ -357,15 +357,25 @@ private final class DiagnosticCollector {
     }
 }
 
-public struct CompileFailure: Swift.Error, CustomStringConvertible {
+public struct CompileFailure: Swift.Error, CustomStringConvertible, LocalizedError {
     public let label: String
     public let underlying: any Swift.Error
     public let diagnostics: [CompilerDiagnostic]
 
     public var description: String {
-        if let frida = underlying as? Frida.Error { return frida.description }
-        return underlying.localizedDescription
+        var message: String
+        if let frida = underlying as? Frida.Error {
+            message = frida.description
+        } else {
+            message = underlying.localizedDescription
+        }
+        if !diagnostics.isEmpty {
+            message += "\n" + diagnostics.map(\.description).joined(separator: "\n")
+        }
+        return message
     }
+
+    public var errorDescription: String? { description }
 }
 
 public struct CompilerDiagnostic: Sendable, Hashable, CustomStringConvertible {
