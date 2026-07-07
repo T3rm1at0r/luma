@@ -8,7 +8,7 @@ import LumaCore
 final class PackageSearchDialog {
     private weak var engine: Engine?
     private var hostDialog: Adw.Dialog?
-    private var onInstalled: (() -> Void)?
+    private var onInstalled: ((InstalledPackage) -> Void)?
 
     private let widget: Box
     private let searchEntry: Entry
@@ -326,9 +326,9 @@ final class PackageSearchDialog {
                 self.updateInstallButtonSensitivity()
             }
             do {
-                _ = try await engine.installPackage(name: name, versionSpec: versionSpec, globalAlias: alias)
+                let installed = try await engine.installPackage(name: name, versionSpec: versionSpec, globalAlias: alias)
                 self.showStatus("Installed \(name)@\(versionSpec).")
-                self.onInstalled?()
+                self.onInstalled?(installed)
                 _ = self.hostDialog?.close()
             } catch {
                 self.showStatus(nil)
@@ -348,7 +348,7 @@ final class PackageSearchDialog {
         return (spec, nil)
     }
 
-    static func present(from anchor: Widget, engine: Engine, onInstalled: @escaping () -> Void) {
+    static func present(from anchor: Widget, engine: Engine, onInstalled: @escaping (InstalledPackage) -> Void) {
         let dialog = PackageSearchDialog(engine: engine)
         dialog.onInstalled = onInstalled
 

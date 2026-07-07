@@ -2345,11 +2345,16 @@ final class MainWindow: InstrumentUIHost {
             {
                 selectSessionsRow(row)
             }
-        case .package:
+        case .package(let id):
             notebookListBox.unselectAll()
             sessionsList.unselectAll()
             customInstrumentsList.unselectAll()
             missionsListBox.unselectAll()
+            if let idx = installedPackages.firstIndex(where: { $0.id == id }),
+                let row = packagesList.getRowAt(index: idx)
+            {
+                packagesList.select(row: row)
+            }
         case .customInstrumentDef(let defID):
             notebookListBox.unselectAll()
             sessionsList.unselectAll()
@@ -3865,22 +3870,27 @@ final class MainWindow: InstrumentUIHost {
 
     private func openPackageSearch(anchor: Button) {
         guard let engine else { return }
-        PackageSearchDialog.present(from: anchor, engine: engine) { [weak self] in
-            self?.refreshPackages()
+        PackageSearchDialog.present(from: anchor, engine: engine) { [weak self] installed in
+            self?.reloadPackages()
+            self?.select(.package(installed.id))
             self?.showToast("Package installed")
         }
     }
 
     private func refreshPackages() {
-        guard let engine else { return }
-        let snapshot = (try? engine.store.fetchPackagesState())?.packages ?? []
-        renderPackages(snapshot)
-        if case .package(let id) = selection, !snapshot.contains(where: { $0.id == id }) {
+        reloadPackages()
+        if case .package(let id) = selection, !installedPackages.contains(where: { $0.id == id }) {
             select(.notebook)
             notebookListBox.select(row: notebookRow)
         } else {
             renderDetail()
         }
+    }
+
+    private func reloadPackages() {
+        guard let engine else { return }
+        let snapshot = (try? engine.store.fetchPackagesState())?.packages ?? []
+        renderPackages(snapshot)
     }
 
     private func makeSharedTracerEditor() -> MonacoEditor {
