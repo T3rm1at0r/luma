@@ -7,7 +7,7 @@ import LumaCore
 @MainActor
 final class PackageSearchDialog {
     private weak var engine: Engine?
-    private weak var hostDialog: Adw.Dialog?
+    private var hostDialog: Adw.Dialog?
     private var onInstalled: (() -> Void)?
 
     private let widget: Box
