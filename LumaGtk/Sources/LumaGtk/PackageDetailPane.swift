@@ -266,7 +266,12 @@ final class PackageDetailPane {
             entries.append((rel, isDir))
         }
 
-        entries.sort { $0.0.localizedStandardCompare($1.0) == .orderedAscending }
+        entries.sort { lhs, rhs in
+            let (lhsPath, lhsIsDir) = lhs
+            let (rhsPath, rhsIsDir) = rhs
+            if lhsIsDir != rhsIsDir { return lhsIsDir }
+            return lhsPath.localizedStandardCompare(rhsPath) == .orderedAscending
+        }
         return entries
     }
 
