@@ -814,11 +814,11 @@ final class InsightDetailView {
     private func attachAddressMenu(to label: Label, address: UInt64) {
         let gesture = GestureClick()
         gesture.set(button: 3)
-        gesture.propagationPhase = GTK_PHASE_CAPTURE
+        gesture.propagationPhase = .capture
         gesture.onPressed { [weak self] gesture, _, x, y in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                _ = gesture.set(state: GTK_EVENT_SEQUENCE_CLAIMED)
+                _ = gesture.set(state: .claimed)
                 let (tx, ty) = self.translatePoint(x: x, y: y, from: label, to: self.widget)
                 self.showAddressMenu(anchor: label, x: tx, y: ty, address: address)
             }

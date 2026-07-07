@@ -307,7 +307,7 @@ final class WelcomeWindow {
 
         labsScroller.set(child: labsList)
         labsScroller.propagateNaturalHeight = true
-        labsScroller.setPolicy(hscrollbarPolicy: GTK_POLICY_NEVER, vscrollbarPolicy: GTK_POLICY_AUTOMATIC)
+        labsScroller.setPolicy(hscrollbarPolicy: .never, vscrollbarPolicy: .automatic)
         labsScroller.visible = false
         labsSection.append(child: labsScroller)
 

@@ -611,7 +611,7 @@ final class AddressNotePopover {
         let messageID = message.id
         let click = GestureClick()
         click.set(button: 3)
-        click.propagationPhase = GTK_PHASE_CAPTURE
+        click.propagationPhase = .capture
         click.onPressed { [weak self] _, _, x, y in
             MainActor.assumeIsolated {
                 self?.showMessageContextMenu(anchor: body, x: x, y: y, messageID: messageID)
@@ -849,7 +849,7 @@ final class AddressNotePopover {
                 box.width > 0
             else { return }
             var natural: gint = 0
-            box.measure(orientation: GTK_ORIENTATION_VERTICAL, for: Int(box.width), natural: &natural)
+            box.measure(orientation: .vertical, for: Int(box.width), natural: &natural)
             adj.upper = Double(natural)
             adj.value = max(0, adj.upper - adj.pageSize)
         }

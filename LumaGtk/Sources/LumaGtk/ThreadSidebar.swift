@@ -24,7 +24,7 @@ enum ThreadSidebar {
 
         let gesture = GestureClick()
         gesture.set(button: 3)
-        gesture.propagationPhase = GTK_PHASE_CAPTURE
+        gesture.propagationPhase = .capture
         gesture.onPressed { [anchor] _, _, x, y in
             MainActor.assumeIsolated {
                 let items: [ContextMenu.Item] = actions.map { action in

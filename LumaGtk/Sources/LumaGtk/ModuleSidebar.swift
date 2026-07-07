@@ -25,11 +25,11 @@ enum ModuleSidebar {
     ) {
         let gesture = GestureClick()
         gesture.set(button: 3)
-        gesture.propagationPhase = GTK_PHASE_CAPTURE
+        gesture.propagationPhase = .capture
         gesture.onPressed { [anchor, weak engine] gesture, _, x, y in
             MainActor.assumeIsolated {
                 guard let engine else { return }
-                _ = gesture.set(state: GTK_EVENT_SEQUENCE_CLAIMED)
+                _ = gesture.set(state: .claimed)
                 AddressActionMenu.present(
                     at: anchor, x: x, y: y, engine: engine, sessionID: sessionID,
                     address: module.base, value: String(format: "0x%llx", module.base),

@@ -310,7 +310,7 @@ final class REPLPane {
         codeLabel.wrap = false
         codeLabel.selectable = true
         let codeScroll = ScrolledWindow()
-        codeScroll.setPolicy(hscrollbarPolicy: GTK_POLICY_AUTOMATIC, vscrollbarPolicy: GTK_POLICY_NEVER)
+        codeScroll.setPolicy(hscrollbarPolicy: .automatic, vscrollbarPolicy: .never)
         codeScroll.propagateNaturalHeight = true
         codeScroll.hexpand = true
         codeScroll.vexpand = false

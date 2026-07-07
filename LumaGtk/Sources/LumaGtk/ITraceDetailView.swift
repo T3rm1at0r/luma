@@ -184,7 +184,7 @@ final class ITraceDetailView {
         }
 
         let modeKey = EventControllerKey()
-        modeKey.propagationPhase = GTK_PHASE_CAPTURE
+        modeKey.propagationPhase = .capture
         modeKey.onKeyPressed { [weak self] _, keyval, _, _ in
             MainActor.assumeIsolated {
                 guard keyval == 0x020 else { return false }

@@ -37,7 +37,7 @@ final class REPLStyledResult {
         label.selectable = true
 
         let scroll = ScrolledWindow()
-        scroll.setPolicy(hscrollbarPolicy: GTK_POLICY_AUTOMATIC, vscrollbarPolicy: GTK_POLICY_NEVER)
+        scroll.setPolicy(hscrollbarPolicy: .automatic, vscrollbarPolicy: .never)
         scroll.propagateNaturalHeight = true
         scroll.hexpand = true
         scroll.vexpand = false

@@ -279,7 +279,7 @@ final class ITraceCFGView {
         nameLabel.halign = .start
         nameLabel.add(cssClass: "caption-heading")
         nameLabel.add(cssClass: "monospace")
-        nameLabel.ellipsize = PangoEllipsizeMode(rawValue: 3)
+        nameLabel.ellipsize = .end
         nameLabel.setSizeRequest(width: Int(nodeWidth) - 20, height: -1)
         nameLabel.marginBottom = 4
         box.append(child: nameLabel)
@@ -413,7 +413,7 @@ final class ITraceCFGView {
             label.hexpand = true
             label.add(cssClass: "monospace")
             label.add(cssClass: "caption")
-            label.ellipsize = PangoEllipsizeMode(rawValue: 3)
+            label.ellipsize = .end
             label.marginStart = 4
             label.marginEnd = 4
             row.set(child: label)
@@ -439,7 +439,7 @@ final class ITraceCFGView {
         }
 
         var natH: gint = 0
-        nodeWidgets[key]?.measure(orientation: GTK_ORIENTATION_VERTICAL, for: -1, natural: &natH)
+        nodeWidgets[key]?.measure(orientation: .vertical, for: -1, natural: &natH)
         let newHeight = natH > 0 ? Double(natH) : baseNodeHeight
         nodeHeights[key] = newHeight
 
@@ -663,7 +663,7 @@ final class ITraceCFGView {
                     // SURFACE unit (trackpads) reports per-event pixel deltas;
                     // WHEEL unit reports discrete ticks that need to be scaled
                     // up to feel like normal scrolling.
-                    let multiplier = controller.unit == GDK_SCROLL_UNIT_WHEEL ? 30.0 : 1.0
+                    let multiplier = controller.unit == .wheel ? 30.0 : 1.0
                     self.panX -= dx * multiplier
                     self.panY -= dy * multiplier
                 }
@@ -903,8 +903,8 @@ final class ITraceCFGView {
     private func naturalSize(of widget: Box) -> (width: Int, height: Int) {
         var natW: gint = 0
         var natH: gint = 0
-        widget.measure(orientation: GTK_ORIENTATION_HORIZONTAL, for: -1, natural: &natW)
-        widget.measure(orientation: GTK_ORIENTATION_VERTICAL, for: Int(natW), natural: &natH)
+        widget.measure(orientation: .horizontal, for: -1, natural: &natW)
+        widget.measure(orientation: .vertical, for: Int(natW), natural: &natH)
         return (Int(natW), Int(natH))
     }
 

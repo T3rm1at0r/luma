@@ -625,7 +625,7 @@ final class EventStreamPane {
             payload.hexpand = true
             payload.lines = 3
             payload.wrap = true
-            payload.ellipsize = PangoEllipsizeMode(rawValue: 3)
+            payload.ellipsize = .end
             payload.selectable = true
             payload.add(cssClass: "monospace")
             row.append(child: payload)
@@ -796,7 +796,7 @@ final class EventStreamPane {
             payload.hexpand = true
             payload.lines = 3
             payload.wrap = true
-            payload.ellipsize = PangoEllipsizeMode(rawValue: 3)
+            payload.ellipsize = .end
             payload.selectable = true
             row.append(child: payload)
         } else if let engine, let sessionID = event.sessionID {
@@ -818,7 +818,7 @@ final class EventStreamPane {
             payload.hexpand = true
             payload.lines = 3
             payload.wrap = true
-            payload.ellipsize = PangoEllipsizeMode(rawValue: 3)
+            payload.ellipsize = .end
             payload.selectable = true
             row.append(child: payload)
         }
@@ -907,7 +907,7 @@ final class EventStreamPane {
             payload.hexpand = true
             payload.lines = 3
             payload.wrap = true
-            payload.ellipsize = PangoEllipsizeMode(rawValue: 3)
+            payload.ellipsize = .end
             payload.selectable = true
             payload.add(cssClass: "monospace")
             column.append(child: payload)

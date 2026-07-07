@@ -498,7 +498,7 @@ final class NotebookPane {
         title.halign = .start
         title.hexpand = true
         title.selectable = true
-        title.ellipsize = PangoEllipsizeMode(rawValue: 3)
+        title.ellipsize = .end
         header.append(child: title)
 
         let timestamp = Label(str: NotebookTimestamp.string(from: entry.timestamp))

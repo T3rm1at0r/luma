@@ -382,7 +382,7 @@ final class CollaborationPanel {
             title.halign = .start
             title.hexpand = true
             title.wrap = false
-            title.ellipsize = PangoEllipsizeMode(rawValue: 3)  // PANGO_ELLIPSIZE_END
+            title.ellipsize = .end  // PANGO_ELLIPSIZE_END
             title.xalign = 0
             title.add(cssClass: "title-4")
             title.selectable = true
@@ -680,7 +680,7 @@ final class CollaborationPanel {
             urlLabel.halign = .start
             urlLabel.hexpand = true
             urlLabel.selectable = true
-            urlLabel.ellipsize = PangoEllipsizeMode(rawValue: 2)
+            urlLabel.ellipsize = .middle
             urlLabel.add(cssClass: "monospace")
             urlLabel.add(cssClass: "caption")
             inviteRow.append(child: urlLabel)

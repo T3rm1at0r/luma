@@ -183,7 +183,7 @@ final class ConsoleView {
         prompt.install(controller: promptClick)
 
         let keyController = EventControllerKey()
-        keyController.propagationPhase = GTK_PHASE_CAPTURE
+        keyController.propagationPhase = .capture
         keyController.onKeyPressed { [weak self] _, keyval, _, _ in
             return MainActor.assumeIsolated {
                 guard let self else { return false }
@@ -394,7 +394,7 @@ final class ConsoleView {
         let inlineRowLimit = 6
         if suggestions.count > inlineRowLimit {
             let scroll = ScrolledWindow()
-            scroll.setPolicy(hscrollbarPolicy: GTK_POLICY_NEVER, vscrollbarPolicy: GTK_POLICY_AUTOMATIC)
+            scroll.setPolicy(hscrollbarPolicy: .never, vscrollbarPolicy: .automatic)
             scroll.propagateNaturalHeight = true
             scroll.maxContentHeight = 160
             scroll.set(child: listBox)
@@ -404,7 +404,7 @@ final class ConsoleView {
             popover.set(child: listBox)
         }
         popover.set(parent: inputEntry)
-        popover.position = GTK_POS_BOTTOM
+        popover.position = .bottom
 
         completionPopover = popover
         completionList = listBox

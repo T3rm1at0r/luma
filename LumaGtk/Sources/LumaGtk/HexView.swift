@@ -48,7 +48,7 @@ public final class HexView {
         let sw = ScrolledWindow()
         sw.hexpand = true
         sw.vexpand = false
-        sw.setPolicy(hscrollbarPolicy: GTK_POLICY_NEVER, vscrollbarPolicy: GTK_POLICY_NEVER)
+        sw.setPolicy(hscrollbarPolicy: .never, vscrollbarPolicy: .never)
         sw.propagateNaturalHeight = true
         sw.set(child: WidgetRef(area.widget_ptr))
         self.scroll = sw
@@ -99,7 +99,7 @@ public final class HexView {
 
     private func configureFont(ctx: Cairo.ContextRef) {
         "monospace".withCString { p in
-            ctx.selectFontFace(p, slant: CAIRO_FONT_SLANT_NORMAL, weight: CAIRO_FONT_WEIGHT_NORMAL)
+            ctx.selectFontFace(p, slant: .normal, weight: .normal)
         }
         ctx.fontSize = fontSize
     }
