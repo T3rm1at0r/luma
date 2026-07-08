@@ -139,9 +139,11 @@ flush_pending(LumaMonacoView *self)
         self->webview->ExecuteScript(script.c_str(), nullptr);
     }
     self->pending_scripts.clear();
+    // Keep pending_uri rather than consuming it: reparenting the GTK
+    // placeholder unrealizes and re-realizes the webview, and the recreated
+    // one has to navigate again or it stays blank.
     if (!self->pending_uri.empty()) {
         self->webview->Navigate(self->pending_uri.c_str());
-        self->pending_uri.clear();
     }
 }
 
@@ -288,6 +290,7 @@ on_placeholder_unrealize(GtkWidget *widget, gpointer user_data)
     self->webview.Reset();
     self->env.Reset();
     self->controller_ready = false;
+    self->delivered_load_finished = false;
     self->parent_hwnd = nullptr;
 }
 
@@ -318,11 +321,9 @@ luma_monaco_view_load_uri(LumaMonacoView *view, const char *uri)
     if (view == nullptr || uri == nullptr) {
         return;
     }
-    std::wstring wuri = Utf8ToWide(uri);
+    view->pending_uri = Utf8ToWide(uri);
     if (view->controller_ready) {
-        view->webview->Navigate(wuri.c_str());
-    } else {
-        view->pending_uri = std::move(wuri);
+        view->webview->Navigate(view->pending_uri.c_str());
     }
 }
 
