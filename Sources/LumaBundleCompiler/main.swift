@@ -406,6 +406,9 @@ struct LumaBundleCompiler {
 
     static func writeGeneratedFile(_ contents: String, to path: String) throws {
         let url = URL(fileURLWithPath: path)
+        // Preserve the mtime on no-op runs so SwiftPM stays incremental.
+        let alreadyUpToDate = (try? String(contentsOf: url, encoding: .utf8)) == contents
+        if alreadyUpToDate { return }
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true,
