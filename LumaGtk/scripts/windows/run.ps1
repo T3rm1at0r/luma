@@ -14,6 +14,7 @@ param(
 
     [string] $VcpkgPrefix,
     [string] $FridaPrefix,
+    [string] $R2Prefix,
 
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]] $ExtraArgs
@@ -39,14 +40,24 @@ $VcpkgPrefix = Resolve-PrefixDir $VcpkgPrefix 'VCPKG_PREFIX' @(
     'C:\src\vcpkg\installed\x64-windows-release'
 )
 $FridaPrefix = Resolve-PrefixDir $FridaPrefix 'FRIDA_PREFIX' @('C:\src\dist')
+$R2Prefix    = Resolve-PrefixDir $R2Prefix    'R2_PREFIX'    @('C:\src\dist')
 
 $exe = Join-Path $pkg ".build\$Configuration\LumaGtk.exe"
 if (-not (Test-Path $exe)) {
     throw "LumaGtk.exe not found at $exe. Build it first with build.ps1."
 }
 
-$env:PATH = "$VcpkgPrefix\bin;$VcpkgPrefix\tools;$FridaPrefix\bin;$env:PATH"
+# GTK/libadwaita read their settings from GSettings; without a compiled
+# schema source they abort with "g_settings_schema_source_lookup: source
+# != NULL". vcpkg ships the schema XML but not the compiled cache.
+$schemaDir = Join-Path $VcpkgPrefix 'share\glib-2.0\schemas'
+if (-not (Test-Path (Join-Path $schemaDir 'gschemas.compiled'))) {
+    & (Join-Path $VcpkgPrefix 'tools\glib\glib-compile-schemas.exe') $schemaDir
+}
+
+$env:PATH = "$VcpkgPrefix\bin;$VcpkgPrefix\tools;$FridaPrefix\bin;$R2Prefix\bin;$env:PATH"
 $env:GDK_PIXBUF_MODULE_FILE = "$VcpkgPrefix\lib\gdk-pixbuf-2.0\2.10.0\loaders.cache"
+$env:GIO_EXTRA_MODULES = "$VcpkgPrefix\plugins\glib-networking"
 $env:XDG_DATA_DIRS = if ($env:XDG_DATA_DIRS) {
     "$VcpkgPrefix\share;$env:XDG_DATA_DIRS"
 } else {
