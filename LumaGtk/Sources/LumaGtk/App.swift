@@ -80,40 +80,7 @@ final class LumaApplication {
     }
 
     private func activate() {
-        if ProcessInfo.processInfo.environment["LUMA_MONACO_SELFTEST"] != nil {
-            runMonacoSelfTest()
-            return
-        }
         ensureDocumentWindow()
-    }
-
-    private func runMonacoSelfTest() {
-        let window = Adw.ApplicationWindow(app: app)
-        let box = Box(orientation: .vertical, spacing: 0)
-        let editor = MonacoEditor(initialText: "const answer: number = 42;")
-        editor.onTextChanged = { report in
-            guard report.contains("monacoDom") else { return }
-            FileHandle.standardError.write("MONACOSELFTEST \(report)\n".data(using: .utf8)!)
-            exit(0)
-        }
-        editor.installInto(box)
-        window.set(content: WidgetRef(box))
-        window.present()
-        editor.whenReady {
-            editor.evaluateProbe(
-                """
-                (function () {
-                    const r = JSON.stringify({
-                        editorGlobal: typeof window.editor,
-                        monacoDom: !!document.querySelector('.monaco-editor'),
-                        bodyLen: document.body ? document.body.innerHTML.length : -1,
-                        loc: location.href
-                    });
-                    window.webkit.messageHandlers.updateText.postMessage(
-                        btoa(unescape(encodeURIComponent(r))));
-                })();
-                """)
-        }
     }
 
     fileprivate func ensureDocumentWindow() {
