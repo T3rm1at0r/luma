@@ -103,6 +103,10 @@ public final class MonacoEditor {
         }
     }
 
+    public func evaluateProbe(_ script: String) {
+        evaluate(script)
+    }
+
     public func focus() {
         guard isLoaded else {
             wantsFocusOnLoad = true
