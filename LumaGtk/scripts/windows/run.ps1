@@ -67,6 +67,8 @@ $env:XDG_DATA_DIRS = $dataDirs -join ';'
 
 # /SUBSYSTEM:WINDOWS means the shell won't wait for the exe by
 # default; Start-Process -Wait keeps the script synchronous.
-$startArgs = @{ FilePath = $exe; Wait = $true; NoNewWindow = $false }
+$stderrLog = Join-Path $pkg 'build\luma-stderr.log'
+Write-Host "stderr -> $stderrLog"
+$startArgs = @{ FilePath = $exe; Wait = $true; NoNewWindow = $false; RedirectStandardError = $stderrLog }
 if ($ExtraArgs) { $startArgs.ArgumentList = $ExtraArgs }
 Start-Process @startArgs
