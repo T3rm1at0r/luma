@@ -433,6 +433,21 @@ editor_accelerator(ICoreWebView2AcceleratorKeyPressedEventArgs *args, guint *key
     return true;
 }
 
+// Alt+F4 targets the focused input window, and DefWindowProc would destroy it
+// and take the webview's host with it; close the GTK window instead.
+static LRESULT CALLBACK
+input_window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    if (msg != WM_CLOSE) {
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+    LumaMonacoView *self = reinterpret_cast<LumaMonacoView *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    post_to_main([self] {
+        gtk_window_close(GTK_WINDOW(gtk_widget_get_root(self->placeholder)));
+    });
+    return 0;
+}
+
 static void
 worker_start_webview2(LumaMonacoView *self)
 {
@@ -441,6 +456,7 @@ worker_start_webview2(LumaMonacoView *self)
     self->input_hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, kInputWindowClass, L"", WS_POPUP,
                                        kOffScreen, kOffScreen, 800, 600,
                                        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    SetWindowLongPtrW(self->input_hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
 
     // We render off-screen; Chromium's native window occlusion detection would
     // see the host window as hidden and throttle rendering to a stop, so disable
@@ -496,7 +512,7 @@ webview_worker_main(LumaMonacoView *self)
     OleInitialize(nullptr);
 
     WNDCLASSEXW wc = { sizeof(wc) };
-    wc.lpfnWndProc = DefWindowProcW;
+    wc.lpfnWndProc = input_window_proc;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = kInputWindowClass;
     RegisterClassExW(&wc);
