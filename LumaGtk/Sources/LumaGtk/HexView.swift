@@ -21,6 +21,11 @@ public final class HexView {
 
     private let bytesPerRow: Int = 16
     private let fontSize: Double = 12
+    #if os(Windows)
+        private let monospaceFamily = "Consolas"
+    #else
+        private let monospaceFamily = "monospace"
+    #endif
     private let marginX: Double = 8
     private let marginY: Double = 6
     private let hexSpacing: Double = 2
@@ -98,7 +103,7 @@ public final class HexView {
     }
 
     private func configureFont(ctx: Cairo.ContextRef) {
-        "monospace".withCString { p in
+        monospaceFamily.withCString { p in
             ctx.selectFontFace(p, slant: .normal, weight: .normal)
         }
         ctx.fontSize = fontSize
