@@ -18,6 +18,11 @@ final class ModuleSymbolsPane {
     private let importsButton: ToggleButton
     private let symbolsButton: ToggleButton
     private let listContainer: Box
+    private let symbolScroll: ScrolledWindow
+    private let symbolModel: StringList
+    private let symbolSelection: NoSelection
+    private let symbolFactory: SignalListItemFactory
+    private let symbolList: ListView
     private let statusLabel: Label
     private let filterEntry: SearchEntry
     private let countLabel: Label
@@ -30,6 +35,51 @@ final class ModuleSymbolsPane {
     private var tab: Tab = .exports
     private var filterText: String = ""
     private var pageIndex = 0
+    private var rows: [RowData] = []
+    private var rowViews: [UnsafeMutableRawPointer: RowView] = [:]
+
+    private struct RowData {
+        let title: String
+        let typeLabel: String
+        let address: UInt64?
+        let context: AddressContext
+    }
+
+    @MainActor
+    private final class RowView {
+        let box: Box
+        let nameLabel: Label
+        let typeChip: Label
+        let addrLabel: Label
+        var data: RowData?
+
+        init() {
+            box = Box(orientation: .horizontal, spacing: 12)
+            box.marginStart = 12
+            box.marginEnd = 12
+            box.marginTop = 6
+            box.marginBottom = 6
+
+            nameLabel = Label(str: "")
+            nameLabel.halign = .start
+            nameLabel.hexpand = true
+            nameLabel.xalign = 0
+            nameLabel.ellipsize = .end
+
+            typeChip = Label(str: "")
+            typeChip.halign = .end
+            typeChip.add(cssClass: "dim-label")
+            typeChip.add(cssClass: "caption")
+
+            addrLabel = Label(str: "")
+            addrLabel.halign = .end
+            addrLabel.add(cssClass: "monospace")
+
+            box.append(child: nameLabel)
+            box.append(child: typeChip)
+            box.append(child: addrLabel)
+        }
+    }
 
     enum Tab {
         case exports
@@ -79,6 +129,24 @@ final class ModuleSymbolsPane {
         listContainer = Box(orientation: .vertical, spacing: 0)
         listContainer.hexpand = true
         listContainer.vexpand = true
+
+        symbolModel = StringList(strings: nil)
+        symbolSelection = NoSelection(model: symbolModel)
+        symbolFactory = SignalListItemFactory()
+        symbolList = ListView(model: symbolSelection, factory: symbolFactory)
+
+        // gtk_no_selection_new / gtk_list_view_new take the model (transfer
+        // full) without the binding adding a ref, so balance the ref we keep.
+        _ = g_object_ref(symbolModel.ptr)
+        _ = g_object_ref(symbolSelection.ptr)
+        symbolList.add(cssClass: "boxed-list")
+
+        symbolScroll = ScrolledWindow()
+        symbolScroll.hexpand = true
+        symbolScroll.vexpand = true
+        symbolScroll.setSizeRequest(width: -1, height: 280)
+        symbolScroll.set(child: symbolList)
+        listContainer.append(child: symbolScroll)
 
         let contentBox = Box(orientation: .vertical, spacing: 8)
         contentBox.hexpand = true
@@ -164,8 +232,40 @@ final class ModuleSymbolsPane {
             }
         }
 
+        configureFactory()
         installFilterShortcut()
         runQuery()
+    }
+
+    private func configureFactory() {
+        symbolFactory.onSetup { [weak self] _, object in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let item = ListItemRef(raw: object.ptr)
+                let rowView = self.makeRowView()
+                self.rowViews[rowView.box.ptr] = rowView
+                item.set(child: rowView.box)
+            }
+        }
+        symbolFactory.onBind { [weak self] _, object in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let item = ListItemRef(raw: object.ptr)
+                guard let child = item.child, let rowView = self.rowViews[child.ptr] else { return }
+                let position = item.position
+                rowView.data = (position >= 0 && position < self.rows.count) ? self.rows[position] : nil
+                self.apply(rowView)
+            }
+        }
+        symbolFactory.onTeardown { [weak self] _, object in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let item = ListItemRef(raw: object.ptr)
+                if let child = item.child {
+                    self.rowViews.removeValue(forKey: child.ptr)
+                }
+            }
+        }
     }
 
     private func switchTab(_ tab: Tab) {
@@ -237,54 +337,36 @@ final class ModuleSymbolsPane {
     }
 
     private func renderCurrent() {
-        clear(listContainer)
         guard let page else { return }
+        rows = rowData(for: page.rows)
 
-        let scroll = ScrolledWindow()
-        scroll.hexpand = true
-        scroll.vexpand = true
-        scroll.setSizeRequest(width: -1, height: 280)
-
-        let list = ListBox()
-        list.selectionMode = .single
-        list.add(cssClass: "boxed-list")
-        scroll.set(child: list)
-
-        switch page.rows {
-        case .exports(let rows):
-            for export in rows {
-                list.append(child: makeRow(
-                    title: export.name,
-                    typeLabel: export.kind.rawValue,
-                    address: export.address,
-                    context: exportContext(export)
-                ))
-            }
-        case .imports(let rows):
-            for imp in rows {
-                let typeLabel = [imp.kind?.rawValue, imp.module].compactMap { $0 }.joined(separator: " · ")
-                let target = importTarget(imp)
-                list.append(child: makeRow(
-                    title: imp.name,
-                    typeLabel: typeLabel.isEmpty ? "import" : typeLabel,
-                    address: target.address,
-                    context: target.context
-                ))
-            }
-        case .symbols(let rows):
-            for sym in rows {
-                let typeLabel = [sym.type, sym.sectionID].compactMap { $0 }.joined(separator: " · ")
-                list.append(child: makeRow(
-                    title: sym.name,
-                    typeLabel: typeLabel,
-                    address: sym.address,
-                    context: symbolContext(sym)
-                ))
-            }
+        symbolModel.splice(position: 0, nRemovals: symbolModel.nItems)
+        for _ in rows.indices {
+            symbolModel.append(string: "")
         }
 
+        symbolScroll.vadjustment?.value = 0
         setFilterCount(page)
-        listContainer.append(child: scroll)
+    }
+
+    private func rowData(for rows: LumaCore.ModuleSymbolPage.Rows) -> [RowData] {
+        switch rows {
+        case .exports(let exports):
+            return exports.map {
+                RowData(title: $0.name, typeLabel: $0.kind.rawValue, address: $0.address, context: exportContext($0))
+            }
+        case .imports(let imports):
+            return imports.map { imp in
+                let typeLabel = [imp.kind?.rawValue, imp.module].compactMap { $0 }.joined(separator: " · ")
+                let target = importTarget(imp)
+                return RowData(title: imp.name, typeLabel: typeLabel.isEmpty ? "import" : typeLabel, address: target.address, context: target.context)
+            }
+        case .symbols(let symbols):
+            return symbols.map { sym in
+                let typeLabel = [sym.type, sym.sectionID].compactMap { $0 }.joined(separator: " · ")
+                return RowData(title: sym.name, typeLabel: typeLabel, address: sym.address, context: symbolContext(sym))
+            }
+        }
     }
 
     private func lastPageIndex(_ page: LumaCore.ModuleSymbolPage) -> Int {
@@ -303,65 +385,54 @@ final class ModuleSymbolsPane {
     }
 
 
-    private func makeRow(title: String, typeLabel: String, address: UInt64?, context: AddressContext) -> ListBoxRow {
-        let row = ListBoxRow()
+    private func apply(_ rowView: RowView) {
+        guard let data = rowView.data else { return }
+        rowView.nameLabel.setText(str: data.title)
+        rowView.typeChip.setText(str: data.typeLabel)
+        rowView.addrLabel.setText(str: data.address.map { String(format: "0x%llx", $0) } ?? "—")
+    }
 
-        let body = Box(orientation: .horizontal, spacing: 12)
-        body.marginStart = 12
-        body.marginEnd = 12
-        body.marginTop = 6
-        body.marginBottom = 6
-
-        let nameLabel = Label(str: title)
-        nameLabel.halign = .start
-        nameLabel.hexpand = true
-        nameLabel.xalign = 0
-        nameLabel.ellipsize = .end
-
-        let typeChip = Label(str: typeLabel)
-        typeChip.halign = .end
-        typeChip.add(cssClass: "dim-label")
-        typeChip.add(cssClass: "caption")
-
-        let addrLabel = Label(str: address.map { String(format: "0x%llx", $0) } ?? "—")
-        addrLabel.halign = .end
-        addrLabel.add(cssClass: "monospace")
-
-        body.append(child: nameLabel)
-        body.append(child: typeChip)
-        body.append(child: addrLabel)
-        row.set(child: body)
-
-        guard let address, let engine else { return row }
+    private func makeRowView() -> RowView {
+        let rowView = RowView()
 
         let click = GestureClick()
         click.set(button: 1)
-        click.onPressed { [weak self] _, nPress, _, _ in
+        click.onPressed { [weak self, weak rowView] _, nPress, _, _ in
             MainActor.assumeIsolated {
-                guard Int(nPress) == 2, let self else { return }
+                guard Int(nPress) == 2, let self, let engine = self.engine,
+                    let data = rowView?.data, let address = data.address
+                else { return }
                 AddressActionMenu.openInsight(
                     engine: engine,
                     sessionID: self.sessionID,
                     address: address,
-                    kind: context.kind == .data ? .memory : .disassembly,
+                    kind: data.context.kind == .data ? .memory : .disassembly,
                     failureLabel: "Can\u{2019}t open"
                 )
             }
         }
-        row.install(controller: click)
+        rowView.box.install(controller: click)
 
-        AddressActionMenu.attach(to: row, engine: engine, sessionID: sessionID, address: address, value: String(format: "0x%llx", address), copyLabel: "Copy Address", context: context)
-
-        return row
-    }
-
-    private func clear(_ box: Box) {
-        var child = box.firstChild
-        while let current = child {
-            child = current.nextSibling
-            box.remove(child: current)
+        let menu = GestureClick()
+        menu.set(button: 3)
+        menu.propagationPhase = .capture
+        menu.onPressed { [weak self, weak rowView] gesture, _, x, y in
+            MainActor.assumeIsolated {
+                guard let self, let engine = self.engine,
+                    let data = rowView?.data, let address = data.address, let box = rowView?.box
+                else { return }
+                _ = gesture.set(state: .claimed)
+                AddressActionMenu.present(
+                    at: box, x: x, y: y, engine: engine, sessionID: self.sessionID,
+                    address: address, value: String(format: "0x%llx", address),
+                    copyLabel: "Copy Address", context: data.context)
+            }
         }
+        rowView.box.install(controller: menu)
+
+        return rowView
     }
+
 }
 
 extension ModuleSymbolsPane {
