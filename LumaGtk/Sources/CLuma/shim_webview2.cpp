@@ -448,6 +448,8 @@ input_window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
     return 0;
 }
 
+static std::wstring webview_user_data_folder();
+
 static void
 worker_start_webview2(LumaMonacoView *self)
 {
@@ -463,8 +465,9 @@ worker_start_webview2(LumaMonacoView *self)
     // it or no frames are ever produced.
     ComPtr<ICoreWebView2EnvironmentOptions> options = Make<CoreWebView2EnvironmentOptions>();
     options->put_AdditionalBrowserArguments(L"--disable-features=CalculateNativeWinOcclusion");
+    std::wstring userDataFolder = webview_user_data_folder();
     CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, nullptr, options.Get(),
+        nullptr, userDataFolder.c_str(), options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [self](HRESULT r, ICoreWebView2Environment *env) -> HRESULT {
                 if (FAILED(r) || env == nullptr) {
@@ -482,6 +485,17 @@ worker_start_webview2(LumaMonacoView *self)
                             return worker_on_controller_created(self, r2, c);
                         }).Get());
             }).Get());
+}
+
+// WebView2 puts its user-data folder next to the executable by default, which
+// fails when the app is installed read-only under Program Files. Keep it under
+// LOCALAPPDATA so the environment can always be created.
+static std::wstring
+webview_user_data_folder()
+{
+    wchar_t localAppData[MAX_PATH];
+    GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH);
+    return std::wstring(localAppData) + L"\\Luma\\WebView2";
 }
 
 static void
