@@ -5488,9 +5488,7 @@ public func deleteCustomInstrument(_ defID: UUID) async {
 
         let message: String
         if var text = String(bytes: data, encoding: .utf8) {
-            if text.hasSuffix("\r\n") {
-                text.removeLast(2)
-            } else if text.hasSuffix("\n") {
+            if text.hasSuffix("\r\n") || text.hasSuffix("\n") {
                 text.removeLast()
             }
             message = text
