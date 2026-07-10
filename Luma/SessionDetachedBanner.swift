@@ -46,6 +46,9 @@ struct SessionContent<Content: View>: View {
         if !hasError, engine.isHostedRemotelyLive(session.id) {
             return .none
         }
+        if session.phase == .attaching {
+            return .detached(session)
+        }
         if session.lastAttachedAt != nil {
             return .detached(session)
         }
