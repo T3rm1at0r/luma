@@ -323,9 +323,6 @@ final class TargetPicker {
         appList.onRowSelected { [weak self] _, row in
             MainActor.assumeIsolated { self?.handleAppRow(row) }
         }
-        appList.onRowActivated { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.commitSpawn() }
-        }
         processSearchEntry.onSearchChanged { [weak self] entry in
             MainActor.assumeIsolated {
                 self?.applyProcessFilter(query: entry.text)
