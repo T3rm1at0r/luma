@@ -303,7 +303,11 @@ jobs:
 
       - name: Override frida-swift with local FridaCore.xcframework
         run: |
+          # Stay on the same frida-swift revision as Package.swift /
+          # Package.resolved. Cloning tip-of-main regenerates bindings that
+          # no longer match this tree.
           git clone https://github.com/frida/frida-swift.git $RUNNER_TEMP/frida-swift
+          git -C $RUNNER_TEMP/frida-swift checkout 467d0360c2cc8ae7db9444316656b4154d22213d
           cp -R $RUNNER_TEMP/FridaCore.xcframework $RUNNER_TEMP/frida-swift/
           python3 - <<'PY'
           import os, re
@@ -606,7 +610,11 @@ jobs:
 
       - name: Override frida-swift with local FridaCore.xcframework
         run: |
+          # Stay on the same frida-swift revision as Package.swift /
+          # Package.resolved. Cloning tip-of-main regenerates bindings that
+          # no longer match this tree.
           git clone https://github.com/frida/frida-swift.git $RUNNER_TEMP/frida-swift
+          git -C $RUNNER_TEMP/frida-swift checkout 467d0360c2cc8ae7db9444316656b4154d22213d
           cp -R $RUNNER_TEMP/FridaCore.xcframework $RUNNER_TEMP/frida-swift/
           python3 - <<'PY'
           import os, re

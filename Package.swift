@@ -60,7 +60,11 @@ let package = Package(
         .executable(name: "LumaBundleCompiler", targets: ["LumaBundleCompiler"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/frida/frida-swift", branch: "main"),
+        // Pin to the revision recorded in Package.resolved. Floating on
+        // branch main pulled a regenerated Frida API that does not match
+        // this tree (and Apple CI clones tip-of-main when injecting the
+        // local FridaCore.xcframework).
+        .package(url: "https://github.com/frida/frida-swift", revision: "467d0360c2cc8ae7db9444316656b4154d22213d"),
         .package(url: "https://github.com/apple/swift-crypto", .upToNextMajor(from: "3.0.0")),
         .package(url: "https://github.com/groue/GRDB.swift", .upToNextMajor(from: "7.0.0")),
         .package(url: "https://github.com/radareorg/SwiftyR2", branch: "main"),
